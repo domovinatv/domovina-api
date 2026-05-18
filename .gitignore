@@ -1,0 +1,32 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# logs
+*.log
+logs/
+
+# node (za eventualne pomoćne skripte)
+node_modules/
+dist/
+build/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# clipboard temp output skripte
+.secrets-tmp

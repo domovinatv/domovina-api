@@ -1,0 +1,43 @@
+# Cloudflare Tunnel ingress za Coolify Supabase
+#
+# Ovo je referentna konfiguracija. Ako koristiš Cloudflare Zero Trust UI
+# (Tunnels → Public Hostnames), unesi iste vrijednosti tamo umjesto YAML-a.
+#
+# Ako koristiš lokalni cloudflared u containeru s mounted configom:
+#   docker run -d --name cloudflared \
+#     --network coolify \
+#     -v $(pwd)/config.yml:/etc/cloudflared/config.yml \
+#     -v $(pwd)/<TUNNEL_UUID>.json:/etc/cloudflared/<TUNNEL_UUID>.json \
+#     cloudflare/cloudflared:latest tunnel run
+
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  # Glavni API gateway (Kong) — sve Supabase rute idu kroz njega
+  - hostname: api.domovina.ai
+    service: http://traefik:80
+    originRequest:
+      # Realtime treba dugi keepalive za WS-ove
+      noTLSVerify: true
+      connectTimeout: 30s
+      keepAliveTimeout: 90s
+      # WS dozvoljen automatski na novijim cloudflared verzijama
+
+  # (opcionalno) Supabase Studio — zaštiti s Cloudflare Access (ms@domovina.tv only)
+  - hostname: studio.domovina.ai
+    service: http://traefik:80
+    originRequest:
+      noTLSVerify: true
+
+  # (opcionalno) Direktan S3 / MinIO API za velike upload-e iz drugih servisa
+  - hostname: s3.domovina.ai
+    service: http://traefik:80
+    originRequest:
+      noTLSVerify: true
+      # Veliki uploadi
+      connectTimeout: 30s
+      tlsTimeout: 30s
+
+  # Catch-all (obavezno na kraju)
+  - service: http_status:404
