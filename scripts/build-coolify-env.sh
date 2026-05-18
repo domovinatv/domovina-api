@@ -113,12 +113,12 @@ PGMETA=$(gen_alnum 32)
 LOGFLARE=$(gen_alnum 32)
 LOGFLARE_PRIV=$(gen_alnum 32)
 MINIO_PASS=$(gen_alnum 32)
-SUPAVISOR=$(gen_alnum 32)
+SUPAVISOR=$(gen_alnum 64)        # SECRET_KEY_BASE za Supavisor (Phoenix) traži ≥64 chars
+REALTIME_SECRET=$(gen_alnum 64)  # SECRET_KEY_BASE za Realtime (Phoenix) traži ≥64 chars
 VAULT_ENC=$(gen_alnum 32)
 ADMIN_PASS=$(gen_alnum 32)
 ADMIN_USER=$(gen_alnum 16)
 MINIO_USER=$(gen_alnum 16)
-SECRET_KEY_BASE=$(openssl rand -hex 32)
 ANON_JWT=$(make_jwt anon "$JWT_SECRET")
 SERVICE_JWT=$(make_jwt service_role "$JWT_SECRET")
 
@@ -171,7 +171,7 @@ SERVICE_USER_ADMIN=${ADMIN_USER}
 SERVICE_USER_MINIO=${MINIO_USER}
 SERVICE_SUPABASEANON_KEY=${ANON_JWT}
 SERVICE_SUPABASESERVICE_KEY=${SERVICE_JWT}
-SECRET_KEY_BASE=${SECRET_KEY_BASE}
+SECRET_PASSWORD_REALTIME=${REALTIME_SECRET}
 EOF
 
 # ---- merge: defaults → overrides → secrets (later wins) ---------------------
@@ -231,7 +231,8 @@ echo "  JWT_SECRET           = $(mask "$JWT_SECRET")"
 echo "  POSTGRES_PASSWORD    = $(mask "$PG_PASS")"
 echo "  ANON_KEY             = $(mask "$ANON_JWT")"
 echo "  SERVICE_ROLE_KEY     = $(mask "$SERVICE_JWT")"
-echo "  SECRET_KEY_BASE      = $(mask "$SECRET_KEY_BASE")"
+echo "  SUPAVISOR_SECRET     = $(mask "$SUPAVISOR")"
+echo "  REALTIME_SECRET      = $(mask "$REALTIME_SECRET")"
 echo "  ADMIN_USER / PASS    = $(mask "$ADMIN_USER") / $(mask "$ADMIN_PASS")"
 echo "  MINIO_USER / PASS    = $(mask "$MINIO_USER") / $(mask "$MINIO_PASS")"
 
