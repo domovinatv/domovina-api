@@ -56,15 +56,33 @@ Traefik :80  ── Coolify-managed labels po Host headeru
    └──> supabase-minio:9000       (s3.domovina.ai, opcionalno)
 ```
 
-## Secrets
+## Secrets workflow (zero leakage)
 
-Sve tajne (JWT secret, DB password, service/anon JWT, MinIO, Logflare, Supavisor, Vault enc key, dashboard admin) **generiraju se offline** skriptom:
+Niti jedan secret ne završi u repo-u niti u chat transkriptu. Workflow:
 
-```bash
-./scripts/generate-coolify-secrets.sh   # kopira sve KEY=VALUE u clipboard
+1. **U Coolifyju kreiraj svjež Supabase service** (Coolify auto-generira sve env vars sa svojim placeholder vrijednostima).
+2. **Otvori Environment Variables → Developer view → kopiraj sve** → spremi lokalno kao `.coolify-defaults.env` (gitignored — Coolify defaults samo služe kao struktura/baseline).
+3. **Kopiraj `cp .local-secrets.env.example .local-secrets.env`** i u njemu popuni:
+   - `SMTP_PASS` = Resend API key
+   - `OPENAI_API_KEY` (opcionalno)
+4. **Pokreni:**
+   ```bash
+   ./scripts/build-coolify-env.sh
+   ```
+   Skripta:
+   - generira sve secrets fresh (`SERVICE_PASSWORD_*`, `SERVICE_USER_*`, HS256 JWT-ovi za `anon` i `service_role`, `SECRET_KEY_BASE`)
+   - override-uje config (`api.domovina.ai`, SSO redirect URL-ovi, Studio brand, phone signup OFF, ...)
+   - merge-a Coolify defaults + naše override-e + local secrets
+   - **kopira finalni env u clipboard** (pbcopy/xclip/wl-copy)
+   - na stdout pokazuje **samo maskirani preview** (`Jb6L****k9Mz`)
+5. **U Coolifyju → Environment Variables → Developer view → Cmd+A → Paste → Save → Deploy**.
+
+Merge layers (kasnije prepisuje ranije):
+```
+.coolify-defaults.env  →  hardcoded overrides + fresh secrets  →  .local-secrets.env
 ```
 
-Zatim **paste u Coolify** → Service → Environment Variables. **Nikad ne commit-aj `.env`.**
+**Rotation** = pokreni skriptu ponovno, paste novi env, redeploy. Rotacija u 30 sekundi.
 
 ## Status deploymenta
 

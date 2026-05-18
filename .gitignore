@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+.coolify-defaults.env
+.local-secrets.env
+!.local-secrets.env.example
 *.pem
 *.key
 *.crt

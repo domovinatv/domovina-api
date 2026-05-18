@@ -1,43 +1,33 @@
 # Cloudflare Tunnel ingress za Coolify Supabase
 #
-# Ovo je referentna konfiguracija. Ako koristiš Cloudflare Zero Trust UI
-# (Tunnels → Public Hostnames), unesi iste vrijednosti tamo umjesto YAML-a.
+# Preporuka: koristi Cloudflare Zero Trust UI (Networks → Tunnels → Public
+# Hostnames) umjesto YAML-a — UI radi isto, ali tunel se sam ažurira bez
+# restarta cloudflared containera.
 #
-# Ako koristiš lokalni cloudflared u containeru s mounted configom:
-#   docker run -d --name cloudflared \
-#     --network coolify \
-#     -v $(pwd)/config.yml:/etc/cloudflared/config.yml \
-#     -v $(pwd)/<TUNNEL_UUID>.json:/etc/cloudflared/<TUNNEL_UUID>.json \
-#     cloudflare/cloudflared:latest tunnel run
+# Ovaj file je referentni / za slučaj da želiš self-managed tunel.
 
 tunnel: <TUNNEL_UUID>
 credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
 
 ingress:
-  # Glavni API gateway (Kong) — sve Supabase rute idu kroz njega
+  # 1) Glavni Supabase API gateway (Kong) — sve rute idu kroz njega:
+  #    /auth/v1/*, /rest/v1/*, /realtime/v1/* (WS), /storage/v1/*,
+  #    /functions/v1/*, /pg/*, /analytics/v1/*
   - hostname: api.domovina.ai
     service: http://traefik:80
     originRequest:
-      # Realtime treba dugi keepalive za WS-ove
       noTLSVerify: true
       connectTimeout: 30s
+      # Realtime WS-ovi
       keepAliveTimeout: 90s
-      # WS dozvoljen automatski na novijim cloudflared verzijama
+      keepAliveConnections: 100
 
-  # (opcionalno) Supabase Studio — zaštiti s Cloudflare Access (ms@domovina.tv only)
+  # 2) Supabase Studio admin UI — OBAVEZNO Cloudflare Access policy (vidi
+  #    docs/deployment-runbook.md, korak "Cloudflare Access za Studio")
   - hostname: studio.domovina.ai
     service: http://traefik:80
     originRequest:
       noTLSVerify: true
-
-  # (opcionalno) Direktan S3 / MinIO API za velike upload-e iz drugih servisa
-  - hostname: s3.domovina.ai
-    service: http://traefik:80
-    originRequest:
-      noTLSVerify: true
-      # Veliki uploadi
-      connectTimeout: 30s
-      tlsTimeout: 30s
 
   # Catch-all (obavezno na kraju)
   - service: http_status:404

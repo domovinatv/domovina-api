@@ -18,21 +18,22 @@ Aktivni runbook za Coolify Supabase deployment na `api.domovina.ai`.
 
 ## Korak 1 — Env vars u Coolifyju
 
-Vidi [`../.env.example`](../.env.example). Ključne vrijednosti za promijeniti od defaulta:
+**Nikad ne uređuj env ručno u Coolify UI-ju** — uvijek koristi build skriptu pa paste.
 
-| Var | Vrijednost |
-|---|---|
-| `SERVICE_FQDN_SUPABASEKONG_8000` | `api.domovina.ai` (ukloni sslip placeholder) |
-| `SUPABASE_PUBLIC_URL` | `https://api.domovina.ai` |
-| `API_EXTERNAL_URL` | `https://api.domovina.ai` |
-| `STORAGE_PUBLIC_URL` | `https://api.domovina.ai` |
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://api.domovina.ai` |
-| `GOTRUE_SITE_URL` | `https://domovina.ai` |
-| `ADDITIONAL_REDIRECT_URLS` | sve domovina.* + localhost (vidi `.env.example`) |
-| `ENABLE_PHONE_SIGNUP` | `false` (default `true` je rizik bez SMS providera) |
-| `ENABLE_PHONE_AUTOCONFIRM` | `false` |
+```bash
+# Jednom (initial setup ili nakon Coolify upgrade-a):
+#   1. Kreiraj svjež Supabase service u Coolifyju (Coolify auto-generira sve vars).
+#   2. Skopiraj Coolify env dump u .coolify-defaults.env (gitignored)
+#   3. cp .local-secrets.env.example .local-secrets.env  (popuni SMTP_PASS = Resend key)
 
-Sve `SERVICE_PASSWORD_*` generiraj preko `scripts/generate-coolify-secrets.sh`.
+./scripts/build-coolify-env.sh
+```
+
+Skripta merge-a Coolify defaults + naše config overrides (`api.domovina.ai`, SSO,
+Studio brand, phone OFF) + fresh secrets + local secrets, i kopira finalni env
+u clipboard. Paste u Coolify Bulk edit → Save.
+
+Detalji u [`../README.md#secrets-workflow-zero-leakage`](../README.md).
 
 ## Korak 2 — Cloudflare DNS
 
