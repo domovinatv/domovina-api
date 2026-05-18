@@ -124,11 +124,17 @@ SERVICE_JWT=$(make_jwt service_role "$JWT_SECRET")
 
 # ---- layer 2: hardcoded config + layer 3: fresh secrets ---------------------
 cat > "$WORK/overrides.env" <<EOF
-# --- public endpoints ---
+# --- public endpoints (Coolify Traefik label gen iz SERVICE_FQDN_<SERVICE>_<PORT>) ---
 SERVICE_FQDN_SUPABASEKONG=api.domovina.ai
 SERVICE_FQDN_SUPABASEKONG_8000=api.domovina.ai
 SERVICE_URL_SUPABASEKONG=https://api.domovina.ai
 SERVICE_URL_SUPABASEKONG_8000=https://api.domovina.ai
+# Studio (iza Cloudflare Access; bez ovog vara studio.domovina.ai → 404 from Traefik)
+SERVICE_FQDN_SUPABASESTUDIO=studio.domovina.ai
+SERVICE_FQDN_SUPABASESTUDIO_3000=studio.domovina.ai
+SERVICE_URL_SUPABASESTUDIO=https://studio.domovina.ai
+SERVICE_URL_SUPABASESTUDIO_3000=https://studio.domovina.ai
+
 SUPABASE_PUBLIC_URL=https://api.domovina.ai
 API_EXTERNAL_URL=https://api.domovina.ai
 STORAGE_PUBLIC_URL=https://api.domovina.ai
