@@ -88,6 +88,70 @@ Merge layers (kasnije prepisuje ranije):
 
 Vidi [`docs/deployment-runbook.md`](docs/deployment-runbook.md) za trenutni stage i sljedeće korake.
 
+## DB migrations workflow
+
+Sav schema-as-code za `public.*` i `domovina_ai.*` živi u [`supabase/migrations/`](supabase/migrations/). App repos (`domovina.ai`, `domovina.energy`, ...) **samo konzumiraju** kroz `supabase_flutter` / `supabase-js` SDK — nikad ne definiraju schemu.
+
+### One-time setup
+
+```bash
+# 1) Popuni SSH access u .local-secrets.env (kopiraj iz .example)
+cp .local-secrets.env.example .local-secrets.env
+# Edit i postavi:
+#   COOLIFY_SSH_HOST=ubuntu@89.168.100.120
+#   COOLIFY_SSH_KEY=~/.ssh/dom-001-oracle-ssh-key-2026-04-20.key
+
+# 2) Verify SSH access
+./scripts/db-psql.sh -c '\dn'
+# Treba pokazati listu schemas (public, auth, storage, ...)
+```
+
+### Apply pending migracije
+
+```bash
+./scripts/db-status.sh           # pokaži applied vs pending
+./scripts/db-migrate.sh          # pg_dump backup + apply pending u transakciji
+./scripts/db-migrate.sh --dry-run        # samo pokaži plan
+./scripts/db-migrate.sh --no-backup      # preskoči pg_dump (brže za dev)
+```
+
+Tracking ide u `supabase_migrations.schema_migrations` (kompatibilno s Supabase CLI-em ako kasnije instaliraš).
+
+### Nova migracija
+
+```bash
+# Filename: YYYYMMDDHHMMSS_<area>_<what>.sql (sortable po prefiksu)
+NEW="supabase/migrations/$(date -u +'%Y%m%d%H%M%S')_my_change.sql"
+$EDITOR "$NEW"
+# Napiši IDEMPOTENTAN SQL (create if not exists, create or replace function,
+# drop trigger if exists pa create).
+
+./scripts/db-migrate.sh --dry-run
+./scripts/db-migrate.sh
+git add supabase/migrations/
+git commit -m "feat(db): <what>"
+git push
+```
+
+### Pomoćne komande
+
+```bash
+./scripts/db-psql.sh                                    # interaktivni psql na live DB
+./scripts/db-psql.sh -c "select * from public.profiles" # one-shot query
+./scripts/db-dump.sh                                    # schema-only dump public + domovina_ai
+./scripts/db-dump.sh --data                             # full dump (schema + data)
+./scripts/db-dump.sh --schemas auth                     # specific schemas
+```
+
+Sve scripte koriste **SSH + docker exec psql** — bez tunela, bez izlaganja DB porta javnosti. Auto-detect-aju `supabase-db-*` container preko `docker ps`.
+
+### Schema referenca
+
+Detaljan spec, ERD i argumentacija žive u [`domovina.ai` repo-u](https://github.com/domovinatv/domovina.ai):
+- [`docs/auth-and-database-plan-v3.md`](https://github.com/domovinatv/domovina.ai/blob/main/docs/auth-and-database-plan-v3.md) — principi (PII u `auth.users`, slug immutable, soft-delete only `accounts`)
+- [`docs/schema-v3.dbml`](https://github.com/domovinatv/domovina.ai/blob/main/docs/schema-v3.dbml) — formal DBML
+- [`docs/backend-prompts/01-07`](https://github.com/domovinatv/domovina.ai/tree/main/docs/backend-prompts) — implementacijske recepture iz kojih su generirane migracije ovdje
+
 ## Licenca
 
 MIT — vidi [`LICENSE`](LICENSE).

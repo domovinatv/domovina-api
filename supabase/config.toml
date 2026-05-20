@@ -1,0 +1,29 @@
+# Supabase CLI config (minimal — koristi se ako kasnije instaliraš `supabase` CLI).
+# Trenutni workflow ne ovisi o CLI-u; sve ide kroz scripts/db-*.sh + SSH + docker exec.
+# Kad budemo dodali type-gen (`supabase gen types dart`), CLI postaje koristan.
+
+project_id = "domovina-api"
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[api]
+schemas = ["public", "domovina_ai", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[auth]
+site_url = "https://domovina.ai"
+additional_redirect_urls = [
+  "https://domovina.ai",
+  "https://www.domovina.ai",
+  "https://domovina.energy",
+  "https://www.domovina.energy",
+  "https://domovina.tv",
+  "https://www.domovina.tv",
+  "http://localhost:3000",
+  "http://localhost:5173",
+]
+jwt_expiry = 3600
+enable_signup = true

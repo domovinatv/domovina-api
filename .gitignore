@@ -5,10 +5,20 @@
 .coolify-defaults.env
 .local-secrets.env
 !.local-secrets.env.example
+.dbtunnel.env
 *.pem
 *.key
 *.crt
 secrets/
+
+# DB backups (lokalni pre-migration snapshots; gitignored — Coolify ima pravi backup)
+backups/*
+!backups/.gitkeep
+
+# Supabase CLI runtime
+supabase/.temp/
+supabase/.branches/
+.supabase/
 
 # editor
 .vscode/
