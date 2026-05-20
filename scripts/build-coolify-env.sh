@@ -156,6 +156,10 @@ STUDIO_DEFAULT_ORGANIZATION=Domovina
 STUDIO_DEFAULT_PROJECT=domovina-api
 POOLER_TENANT_ID=domovina
 
+# --- PostgREST schema exposure — KRITIČNO za domovina.ai Flutter klijent ---
+# Bez domovina_ai u listi, PostgREST ne exposa watch_progress/favorites/itd.
+PGRST_DB_SCHEMAS=public,storage,graphql_public,domovina_ai
+
 # --- SMTP defaults (SMTP_PASS dolazi iz .local-secrets.env) ---
 SMTP_HOST=smtp.resend.com
 SMTP_PORT=465

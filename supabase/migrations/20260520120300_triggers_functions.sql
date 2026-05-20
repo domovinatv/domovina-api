@@ -22,8 +22,8 @@ returns citext
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_base citext;
-  v_candidate citext;
+  v_base public.citext;
+  v_candidate public.citext;
   v_suffix int := 0;
 begin
   -- ukloni @domain dio, lowercase, non-alphanum → '-', trim '-' s rubova
@@ -52,7 +52,7 @@ returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_slug citext;
+  v_slug public.citext;
   v_account_id uuid;
   v_name text;
 begin
@@ -95,7 +95,7 @@ returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_slug citext;
+  v_slug public.citext;
   v_account_id uuid;
   v_name text;
 begin
