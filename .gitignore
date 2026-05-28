@@ -22,11 +22,12 @@ supabase/.temp/
 supabase/.branches/
 .supabase/
 
-# editor
+# editor / tooling
 .vscode/
 .idea/
 *.swp
 .DS_Store
+.antigravitycli/
 
 # logs
 *.log
