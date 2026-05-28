@@ -107,15 +107,21 @@ async function maybeUser(req: Request) {
   return user;
 }
 
-// Mint GoTrue magiclink → action_link (pravi session bridge, isti kao handoff).
-async function mintActionLink(email: string, redirectTo: string) {
+// Mint GoTrue magiclink. Vraćamo i email_otp (6-zn. kod) i action_link.
+// Klijent PRIMARNO koristi email_otp preko verifyOTP (direktan session, bez
+// redirecta) — redirect/PKCE flow se na webu ne uhvati jer je link server-
+// generiran (nema PKCE verifier na klijentu). action_link ostaje kao fallback.
+async function mintSession(email: string, redirectTo: string) {
   const { data, error } = await admin.auth.admin.generateLink({
     type: "magiclink",
     email,
     options: { redirectTo },
   });
   if (error) throw error;
-  return data?.properties?.action_link as string;
+  return {
+    email_otp: data?.properties?.email_otp as string | undefined,
+    action_link: data?.properties?.action_link as string | undefined,
+  };
 }
 
 // --- register ---------------------------------------------------------------
@@ -225,9 +231,9 @@ async function registerFinish(req: Request) {
   await admin.from("webauthn_challenges").delete().eq("id", ch.id);
 
   if (!email) return json({ error: "no_email_for_session" }, 400);
-  const actionLink = await mintActionLink(email, deepLinkRedirect(req));
+  const session = await mintSession(email, deepLinkRedirect(req));
 
-  return json({ action_link: actionLink, user_id: userId, anon_id: anonId ?? null }, 200);
+  return json({ ...session, email, user_id: userId, anon_id: anonId ?? null }, 200);
 }
 
 // --- login -------------------------------------------------------------------
@@ -295,8 +301,8 @@ async function loginFinish(req: Request) {
   const email = u?.user?.email;
   if (!email) return json({ error: "no_email_for_session" }, 400);
 
-  const actionLink = await mintActionLink(email, deepLinkRedirect(req));
-  return json({ action_link: actionLink, user_id: stored.user_id }, 200);
+  const session = await mintSession(email, deepLinkRedirect(req));
+  return json({ ...session, email, user_id: stored.user_id }, 200);
 }
 
 // --- shared ------------------------------------------------------------------
