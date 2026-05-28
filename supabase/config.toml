@@ -24,6 +24,10 @@ additional_redirect_urls = [
   "https://www.domovina.tv",
   "http://localhost:3000",
   "http://localhost:5173",
+  "ai.domovina://auth/callback",
 ]
 jwt_expiry = 3600
 enable_signup = true
+
+[functions.handoff-consume]
+verify_jwt = false   # interno verificiramo authHeader (getUser) prije consume-a
