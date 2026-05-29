@@ -90,7 +90,9 @@ fi
 while IFS= read -r rel; do
   [ -z "$rel" ] && continue
   dir="/home/deno/functions/$(dirname "$rel")"
-  ssh_remote "docker exec $EDGE mkdir -p '$dir'"
+  # </dev/null: spriječi da ssh proždere stdin while-petlje (here-string),
+  # inače petlja stane nakon prvog filea (mkdir ssh "pojede" ostatak liste).
+  ssh_remote "docker exec $EDGE mkdir -p '$dir'" </dev/null
   ssh_remote "docker exec -i $EDGE sh -c 'cat > /home/deno/functions/$rel'" < "$FUNCTIONS_DIR/$rel"
   echo "   ✓ $rel"
 done <<< "$FILES"
