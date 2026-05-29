@@ -93,9 +93,10 @@ trap 'rm -rf "$WORK"' EXIT
 
 # Merge u awk-u. Output: merged env (order = live dump, pa novi override-only keys).
 # Diff redovi (samo za config-override ključeve) idu na fd 3 → odvojeni file.
-awk -v csv_union="$CSV_UNION_KEYS" '
+awk -v csv_union="$CSV_UNION_KEYS" -v ef="$EXTRA_SRC" -v of="$OVERRIDES_FILE" -v cf="$CURRENT_FILE" '
   function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t\r]+$/,"",s); return s }
   function in_csv(k,   i){ for(i in CSVU) if(CSVU[i]==k) return 1; return 0 }
+  function safeflag(k){ return in_csv(k) ? "SAFE" : "MASK" }
   # union dvije CSV liste: zadrži live order, appendaj missing iz ovr
   function csv_union_merge(live,ovr,   a,b,i,j,out,seen,n,m,found){
     n=split(live,a,","); m=split(ovr,b,",")
@@ -107,8 +108,9 @@ awk -v csv_union="$CSV_UNION_KEYS" '
   BEGIN{
     nc=split(csv_union,CSVU," ")
   }
-  # redoslijed datoteka: 1=extra (secret), 2=overrides, 3=current(live)
-  FNR==1 { files++; phase=(files==1?"extra":(files==2?"ovr":"live")) }
+  # Faza po IMENU datoteke (robusno na prazan/dev-null extra — brojač datoteka
+  # ne radi jer prazan file ne okine FNR==1).
+  FNR==1 { phase=(FILENAME==ef?"extra":(FILENAME==of?"ovr":"live")) }
   # skip komentare/prazno
   /^[[:space:]]*#/ { next }
   /^[[:space:]]*$/ { next }
@@ -141,10 +143,10 @@ awk -v csv_union="$CSV_UNION_KEYS" '
       k=LIVEORDER[i]; lv=LIVE[k]
       if(k in EXTRA){
         nv=EXTRA[k]
-        if(nv!=lv) printf("CHG\037%s\037%s\037%s\037%s\n",k,lv,nv,"SEC") > "/dev/stderr"
+        if(nv!=lv) printf("CHG\037%s\037%s\037%s\037%s\n",k,lv,nv,safeflag(k)) > "/dev/stderr"
       } else if(k in OVR){
         nv=(in_csv(k) ? csv_union_merge(lv,OVR[k]) : OVR[k])
-        if(nv!=lv) printf("CHG\037%s\037%s\037%s\037%s\n",k,lv,nv,"") > "/dev/stderr"
+        if(nv!=lv) printf("CHG\037%s\037%s\037%s\037%s\n",k,lv,nv,safeflag(k)) > "/dev/stderr"
       } else {
         nv=lv
       }
@@ -155,7 +157,7 @@ awk -v csv_union="$CSV_UNION_KEYS" '
     for(i=1;i<=no;i++){
       k=OVRORDER[i]
       if(!(k in EMIT) && !(k in EXTRA)){
-        printf("NEW\037%s\037\037%s\037%s\n",k,OVR[k],"") > "/dev/stderr"
+        printf("NEW\037%s\037\037%s\037%s\n",k,OVR[k],safeflag(k)) > "/dev/stderr"
         print k "=" OVR[k]; EMIT[k]=1
       }
     }
@@ -163,7 +165,7 @@ awk -v csv_union="$CSV_UNION_KEYS" '
     for(i=1;i<=ne;i++){
       k=EXTORDER[i]
       if(!(k in EMIT)){
-        printf("NEW\037%s\037\037%s\037%s\n",k,EXTRA[k],"SEC") > "/dev/stderr"
+        printf("NEW\037%s\037\037%s\037%s\n",k,EXTRA[k],safeflag(k)) > "/dev/stderr"
         print k "=" EXTRA[k]; EMIT[k]=1
       }
     }
@@ -185,13 +187,13 @@ MERGED_COUNT=$(grep -c '=' "$WORK/merged.env" 2>/dev/null || echo 0)
 echo "→ live keys:   $LIVE_COUNT"
 echo "→ merged keys: $MERGED_COUNT"
 echo ""
-echo "Promjene (vrijednosti iz secret layera su maskirane):"
+echo "Promjene (samo whitelisted config ključevi se prikazuju u punom; sve ostalo maskirano):"
 if [ -s "$WORK/diff.txt" ]; then
-  while IFS=$'\037' read -r kind key oldv newv sec; do
-    if [ "$sec" = "SEC" ]; then oldv="$(mask "$oldv")"; newv="$(mask "$newv")"; fi
+  while IFS=$'\037' read -r kind key oldv newv flag; do
+    if [ "$flag" != "SAFE" ]; then oldv="$(mask "$oldv")"; newv="$(mask "$newv")"; fi
     case "$kind" in
-      CHG) echo "  ~ $key$([ "$sec" = SEC ] && echo ' (secret)')"; echo "      old: $oldv"; echo "      new: $newv" ;;
-      NEW) echo "  + $key = $newv  (novi key$([ "$sec" = SEC ] && echo ', secret'))" ;;
+      CHG) echo "  ~ $key"; echo "      old: $oldv"; echo "      new: $newv" ;;
+      NEW) echo "  + $key = $newv  (novi key)" ;;
     esac
   done < "$WORK/diff.txt"
 else
