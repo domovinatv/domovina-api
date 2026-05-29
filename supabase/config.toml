@@ -37,3 +37,9 @@ verify_jwt = false   # login/register-new nemaju sesiju; auth se interno provjer
 
 [functions.certilia]
 verify_jwt = false   # bridge prima Certilia idToken (verificira se interno vs JWKS), ne GoTrue JWT
+
+[functions.pinka-contribute]
+verify_jwt = false   # interno getUser (anon sesija je OK); create_contribution ide preko user klijenta
+
+[functions.pinka-webhook]
+verify_jwt = false   # server-to-server s pay rail-a; autentikacija je svix HMAC potpis, ne JWT
