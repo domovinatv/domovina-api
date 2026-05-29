@@ -80,6 +80,17 @@ fi
 if $FULL_REDEPLOY; then
   echo ""; echo "── [3/4] full stack restart ──"
   "$SCRIPT_DIR/coolify-restart.sh" -y
+  # Stack se vraća ~2-3 min — čekaj da core containeri budu Up prije verify-a
+  # (inače ops-verify lažno padne). Poll do 5 min.
+  # shellcheck source=lib/db-env.sh
+  . "$SCRIPT_DIR/lib/db-env.sh"
+  echo "→ čekam povratak stacka (core: kong/rest/auth/db, max ~5 min)..."
+  for _ in $(seq 1 30); do
+    sleep 10
+    UP=$(ssh_remote "docker ps --format '{{.Names}} {{.Status}}' | grep -E '^supabase-(kong|rest|auth|db)-' | grep -c Up" 2>/dev/null || echo 0)
+    if [ "$UP" = "4" ]; then echo "   core up (4/4)"; sleep 5; break; fi
+    echo "   ... ($UP/4 core up)"
+  done
 else
   echo ""; echo "── [3/4] full stack restart preskočen (--full-redeploy za to) ──"
 fi
