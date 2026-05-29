@@ -22,6 +22,7 @@ Status: backend production-ready za MVP. Sve niže su poboljšanja / sljedeće f
 - [ ] **Uptime Kuma + Telegram alerts** — vidi `docs/setup-guides/uptime-monitoring.md`. Alerting kad auth padne.
 - [ ] **pg_cron schedule za `cleanup_expired_handoffs`** — komentar u migraciji `06_handoff_rpc.sql`. Manual za sad, dodati kad bude prvi cross-device flow.
 - [ ] **Pre-rotation script za pg password** — TODO u `docs/deployment-runbook.md`. Skripta koja preko `ALTER USER` zarotira pg password sa starom prije generiranja novog env-a.
+- [ ] **🔴 Rotacija leaknutih secreta (2026-05-29)** — `coolify-env-merge.sh` bug ispisao live env u chat (fix `8211733`). Rotation queue + postupci u `docs/secret-rotation.md`. Odgođeno na maintenance window (JWT rotacija ruši frontende dok ne dobiju novi anon key).
 
 ## Faza 2 (cross-device / M5)
 
@@ -44,6 +45,7 @@ Status: backend production-ready za MVP. Sve niže su poboljšanja / sljedeće f
 
 ## Reference
 
+- Secret rotation runbook + rotation queue: `docs/secret-rotation.md`
 - Status checklist u `docs/deployment-runbook.md` (one-shot deploy)
 - Setup guides u `docs/setup-guides/`
 - Handoffs u `docs/handoffs/`
