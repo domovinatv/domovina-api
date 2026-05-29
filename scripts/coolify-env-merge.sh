@@ -16,14 +16,21 @@
 #   3) Pregledaj DIFF (ispod). Ako OK → sadržaj je u clipboardu (+ .coolify-merged.env).
 #   4) Coolify → Bulk edit → Cmd+A → Paste → Save → Deploy.
 #
-# Merge pravila (vidi coolify-config-overrides.env):
-#   - scalar key   → override zamjenjuje live vrijednost
+# Slojevi (prioritet: EXTRA > overrides > live):
+#   - .coolify-current.env          live dump (baseline, svi secreti passthrough)
+#   - coolify-config-overrides.env  committed ne-tajni config (scalar ili CSV_UNION)
+#   - .coolify-extra.env            OPCIONALNI gitignored secret/extra sloj
+#                                   (npr. CERTILIA_CLIENT_ID, KYC_ENCRYPTION_KEY);
+#                                   vrijednosti maskirane u diffu, prave u bundleu
+#
+# Merge pravila:
+#   - scalar key   → override/extra zamjenjuje live vrijednost
 #   - CSV_UNION key → union: live stavke ostaju, dodaju se samo one koje fale
 #   - key samo u live-u → passthrough netaknut (svi secreti idu ovuda)
 #
 # Usage:
 #   ./scripts/coolify-env-merge.sh
-#   ./scripts/coolify-env-merge.sh --current=path.env --overrides=path.env
+#   ./scripts/coolify-env-merge.sh --current=path.env --overrides=path.env --extra=path.env
 #   ./scripts/coolify-env-merge.sh --no-copy        # bez clipboarda, samo file+diff
 
 set -euo pipefail
@@ -32,6 +39,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 CURRENT_FILE="$REPO_ROOT/.coolify-current.env"
 OVERRIDES_FILE="$REPO_ROOT/coolify-config-overrides.env"
+EXTRA_FILE="$REPO_ROOT/.coolify-extra.env"   # opcionalni gitignored secret layer
 MERGED_FILE="$REPO_ROOT/.coolify-merged.env"
 COPY=true
 
@@ -44,6 +52,7 @@ for arg in "$@"; do
   case "$arg" in
     --current=*)   CURRENT_FILE="${arg#*=}" ;;
     --overrides=*) OVERRIDES_FILE="${arg#*=}" ;;
+    --extra=*)     EXTRA_FILE="${arg#*=}" ;;
     --no-copy)     COPY=false ;;
     -h|--help)     sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $arg" >&2; exit 2 ;;
@@ -67,6 +76,9 @@ if [ ! -f "$OVERRIDES_FILE" ]; then
   echo "❌ '$OVERRIDES_FILE' ne postoji (committed config layer)." >&2
   exit 1
 fi
+# Extra layer je opcionalan (gitignored secreti, npr. CERTILIA_CLIENT_ID, KYC_ENCRYPTION_KEY).
+EXTRA_SRC="$EXTRA_FILE"
+[ -f "$EXTRA_SRC" ] || EXTRA_SRC="/dev/null"
 
 mask() {
   local v=$1 n=${#1}
@@ -94,9 +106,9 @@ awk -v csv_union="$CSV_UNION_KEYS" '
   }
   BEGIN{
     nc=split(csv_union,CSVU," ")
-    phase="ovr"   # prvi file = overrides
   }
-  FNR==1 { files++; if(files==1) phase="ovr"; else phase="live" }
+  # redoslijed datoteka: 1=extra (secret), 2=overrides, 3=current(live)
+  FNR==1 { files++; phase=(files==1?"extra":(files==2?"ovr":"live")) }
   # skip komentare/prazno
   /^[[:space:]]*#/ { next }
   /^[[:space:]]*$/ { next }
@@ -107,6 +119,11 @@ awk -v csv_union="$CSV_UNION_KEYS" '
     key=substr(line,1,eq-1)
     val=substr(line,eq+1)
     key=trim(key)
+  }
+  phase=="extra" {
+    EXTRA[key]=val; SECRET[key]=1
+    if(!(key in EXTSEEN)){ EXTSEEN[key]=1; EXTORDER[++ne]=key }
+    next
   }
   phase=="ovr" {
     OVR[key]=val
@@ -119,40 +136,46 @@ awk -v csv_union="$CSV_UNION_KEYS" '
     next
   }
   END{
-    # 1) emitiraj live order
+    # 1) emitiraj live order; precedence: EXTRA > OVR > LIVE
     for(i=1;i<=nl;i++){
       k=LIVEORDER[i]; lv=LIVE[k]
-      if(k in OVR){
-        if(in_csv(k)){
-          nv=csv_union_merge(lv,OVR[k])
-        } else {
-          nv=OVR[k]
-        }
-        if(nv!=lv) printf("CHG\t%s\t%s\t%s\n",k,lv,nv) > "/dev/stderr"
-        print k "=" nv
-        EMIT[k]=1
+      if(k in EXTRA){
+        nv=EXTRA[k]
+        if(nv!=lv) printf("CHG\037%s\037%s\037%s\037%s\n",k,lv,nv,"SEC") > "/dev/stderr"
+      } else if(k in OVR){
+        nv=(in_csv(k) ? csv_union_merge(lv,OVR[k]) : OVR[k])
+        if(nv!=lv) printf("CHG\037%s\037%s\037%s\037%s\n",k,lv,nv,"") > "/dev/stderr"
       } else {
-        print k "=" lv
-        EMIT[k]=1
+        nv=lv
       }
+      print k "=" nv
+      EMIT[k]=1
     }
-    # 2) override-only keys (fale u live-u) — dodaj na kraj
+    # 2) override-only keys (fale u live-u)
     for(i=1;i<=no;i++){
       k=OVRORDER[i]
+      if(!(k in EMIT) && !(k in EXTRA)){
+        printf("NEW\037%s\037\037%s\037%s\n",k,OVR[k],"") > "/dev/stderr"
+        print k "=" OVR[k]; EMIT[k]=1
+      }
+    }
+    # 3) extra-only keys (secreti koji fale u live-u, npr. certilia)
+    for(i=1;i<=ne;i++){
+      k=EXTORDER[i]
       if(!(k in EMIT)){
-        nv=OVR[k]
-        printf("NEW\t%s\t\t%s\n",k,nv) > "/dev/stderr"
-        print k "=" nv
+        printf("NEW\037%s\037\037%s\037%s\n",k,EXTRA[k],"SEC") > "/dev/stderr"
+        print k "=" EXTRA[k]; EMIT[k]=1
       }
     }
   }
-' "$OVERRIDES_FILE" "$CURRENT_FILE" > "$WORK/merged.env" 2> "$WORK/diff.txt"
+' "$EXTRA_SRC" "$OVERRIDES_FILE" "$CURRENT_FILE" > "$WORK/merged.env" 2> "$WORK/diff.txt"
 
 # Header
+EXTRA_NOTE=""; [ "$EXTRA_SRC" != "/dev/null" ] && EXTRA_NOTE=" + $(basename "$EXTRA_FILE") (secret layer)"
 {
   echo "# DOMOVINA-API — merged Coolify env (built $(date -u +'%Y-%m-%dT%H:%M:%SZ'))"
-  echo "# Source: live dump ($(basename "$CURRENT_FILE")) + coolify-config-overrides.env"
-  echo "# Generated by scripts/coolify-env-merge.sh — secreti su passthrough, ne-rotirani."
+  echo "# Source: live dump ($(basename "$CURRENT_FILE")) + coolify-config-overrides.env${EXTRA_NOTE}"
+  echo "# Generated by scripts/coolify-env-merge.sh — postojeći secreti passthrough, ne-rotirani."
   cat "$WORK/merged.env"
 } > "$MERGED_FILE"
 
@@ -162,16 +185,17 @@ MERGED_COUNT=$(grep -c '=' "$WORK/merged.env" 2>/dev/null || echo 0)
 echo "→ live keys:   $LIVE_COUNT"
 echo "→ merged keys: $MERGED_COUNT"
 echo ""
-echo "Promjene (samo ne-tajni config ključevi; secreti netaknuti):"
+echo "Promjene (vrijednosti iz secret layera su maskirane):"
 if [ -s "$WORK/diff.txt" ]; then
-  while IFS=$'\t' read -r kind key oldv newv; do
+  while IFS=$'\037' read -r kind key oldv newv sec; do
+    if [ "$sec" = "SEC" ]; then oldv="$(mask "$oldv")"; newv="$(mask "$newv")"; fi
     case "$kind" in
-      CHG) echo "  ~ $key"; echo "      old: $oldv"; echo "      new: $newv" ;;
-      NEW) echo "  + $key=$newv  (novi key)" ;;
+      CHG) echo "  ~ $key$([ "$sec" = SEC ] && echo ' (secret)')"; echo "      old: $oldv"; echo "      new: $newv" ;;
+      NEW) echo "  + $key = $newv  (novi key$([ "$sec" = SEC ] && echo ', secret'))" ;;
     esac
   done < "$WORK/diff.txt"
 else
-  echo "  (nema promjena — live je već u skladu s config override-ima)"
+  echo "  (nema promjena — live je već u skladu s config/secret slojevima)"
 fi
 
 echo ""

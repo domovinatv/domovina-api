@@ -5,6 +5,7 @@
 .coolify-defaults.env
 .coolify-current.env
 .coolify-merged.env
+.coolify-extra.env
 .local-secrets.env
 !.local-secrets.env.example
 .dbtunnel.env
