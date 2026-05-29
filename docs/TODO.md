@@ -25,8 +25,12 @@ Status: backend production-ready za MVP. Sve niže su poboljšanja / sljedeće f
 
 ## Faza 2 (cross-device / M5)
 
-- [ ] **Edge function deploy-as-code** — `handoff-consume` je deployan ručno (files → host volume `…/volumes/functions/` preko `docker exec` + restart). NEMA deploy skripte; Coolify redeploy bi mogao prebrisati volume. Dodati `scripts/deploy-functions.sh` (rsync repo `supabase/functions/` → host volume) prije nego se osloni na njega u produkciji.
+- [ ] **❗ certilia env fali** — `certilia` edge fn treba `CERTILIA_CLIENT_ID` + `KYC_ENCRYPTION_KEY` (i opcionalno `CERTILIA_ISSUER`, default `https://idp.certilia.com`). Trenutno MISSING u Coolify env-u i u edge containeru → certilia ne radi (JWT audience + KYC enkripcija pucaju). User action: dodati u Coolify env (preko `coolify-env-merge.sh` workflow) + redeploy. `KYC_ENCRYPTION_KEY` je secret (pgcrypto ključ za OIB) — ide u `.local-secrets.env`/override layer, ne u repo.
 - [ ] **handoff-consume end-to-end test** — deployment + auth gate verificiran (401 not_authenticated bez user sesije). Pravi e2e (valjan 6-digit kod → `action_link`) treba user-session JWT; testira Flutter na M5.
+
+## Done (recent)
+
+- [x] **Edge function deploy-as-code** — `scripts/deploy-functions.sh` deploya repo `supabase/functions/` → host volume preko `docker exec` (čuva hello/main, opc. restart). Reproducibilno iz gita; rješava redeploy-wipe rizik za certilia/passkey/handoff-consume.
 
 ## Done (recent)
 
