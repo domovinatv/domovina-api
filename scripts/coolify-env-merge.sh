@@ -213,4 +213,4 @@ fi
 
 echo ""
 echo "Next: Coolify → Bulk edit → Cmd+A → Paste → Save → Deploy."
-echo "Cleanup kad gotov:  rm -f $CURRENT_FILE $MERGED_FILE"
+echo "(Lokalni $(basename "$CURRENT_FILE")/$(basename "$MERGED_FILE") su gitignored — ostavi ih za iduću iteraciju.)"
