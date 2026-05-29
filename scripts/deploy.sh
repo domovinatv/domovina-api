@@ -87,7 +87,7 @@ if $FULL_REDEPLOY; then
   echo "→ čekam povratak stacka (core: kong/rest/auth/db, max ~5 min)..."
   for _ in $(seq 1 30); do
     sleep 10
-    UP=$(ssh_remote "docker ps --format '{{.Names}} {{.Status}}' | grep -E '^supabase-(kong|rest|auth|db)-' | grep -c Up" 2>/dev/null || echo 0)
+    UP=$(ssh_remote "docker ps --format '{{.Names}} {{.Status}}' | grep -E '^supabase-(kong|rest|auth|db)-' | grep -c Up" 2>/dev/null || true); UP=${UP:-0}
     if [ "$UP" = "4" ]; then echo "   core up (4/4)"; sleep 5; break; fi
     echo "   ... ($UP/4 core up)"
   done
