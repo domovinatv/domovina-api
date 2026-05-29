@@ -23,14 +23,21 @@ const DISCOVERY =
 
 const admin = createClient(URL_, SERVICE, { auth: { persistSession: false } });
 
-// JWKS remote set (interno cacheira ključeve s TTL-om).
+// JWKS remote set + kanonski issuer iz discovery dokumenta.
+// CERTILIA_ISSUER je BAZA za discovery URL (npr. https://idp.certilia.com), ali
+// stvarni `iss` u tokenu je ono što IDP deklarira u discovery.issuer
+// (npr. https://idp.certilia.com/oauth2/token) — NE pretpostavljaj da su isti.
 let _jwks: ReturnType<typeof jose.createRemoteJWKSet> | null = null;
-async function getJwks() {
-  if (_jwks) return _jwks;
+let _issuer: string | null = null;
+async function getOidc() {
+  if (_jwks && _issuer) return { jwks: _jwks, issuer: _issuer };
   const disc = await fetch(DISCOVERY).then((r) => r.json());
-  if (!disc?.jwks_uri) throw new Error("certilia_discovery_failed");
+  if (!disc?.jwks_uri || !disc?.issuer) {
+    throw new Error("certilia_discovery_failed");
+  }
   _jwks = jose.createRemoteJWKSet(new URL(disc.jwks_uri));
-  return _jwks;
+  _issuer = disc.issuer as string;
+  return { jwks: _jwks, issuer: _issuer };
 }
 
 Deno.serve(async (req) => {
@@ -46,8 +53,9 @@ Deno.serve(async (req) => {
     // 1. Verificiraj idToken (potpis + iss + aud). NE vjeruj klijentu.
     let payload: jose.JWTPayload;
     try {
-      const res = await jose.jwtVerify(idToken, await getJwks(), {
-        issuer: CERTILIA_ISSUER,
+      const { jwks, issuer } = await getOidc();
+      const res = await jose.jwtVerify(idToken, jwks, {
+        issuer,
         audience: CERTILIA_CLIENT_ID,
       });
       payload = res.payload;
