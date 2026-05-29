@@ -16,6 +16,8 @@ const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CERTILIA_ISSUER =
   Deno.env.get("CERTILIA_ISSUER") ?? "https://idp.certilia.com";
 const CERTILIA_CLIENT_ID = Deno.env.get("CERTILIA_CLIENT_ID")!;
+// Ključ za enkripciju OIB-a u public.identity_verifications (pgcrypto). NIKAD u bazi.
+const KYC_ENCRYPTION_KEY = Deno.env.get("KYC_ENCRYPTION_KEY")!;
 const DISCOVERY =
   `${CERTILIA_ISSUER}/oauth2/oidcdiscovery/.well-known/openid-configuration`;
 
@@ -53,24 +55,33 @@ Deno.serve(async (req) => {
       return json({ error: "invalid_token", detail: String((e as Error)?.message ?? e) }, 401);
     }
 
-    // 2. Trusted claimovi.
+    // 2. Trusted claimovi — verificirani MINIMUM (čl. 5(1)(c) data minimization).
+    const sub = payload.sub as string;
     const oib = (payload.oib ?? payload.pin) as string | undefined;
     if (!oib) return json({ error: "no_oib_claim" }, 400);
+    const firstName = (payload.given_name ?? payload.firstname) as string | undefined;
+    const lastName = (payload.family_name ?? payload.lastname) as string | undefined;
+    const dob = (payload.birthdate ?? payload.date_of_birth) as string | undefined;
+    const country = (payload.country ??
+      (payload.address as Record<string, unknown> | undefined)?.country) as
+        | string
+        | undefined;
     const realEmail = (payload.email as string | undefined) || undefined;
     const fullName =
-      [payload.given_name, payload.family_name].filter(Boolean).join(" ") ||
+      [firstName, lastName].filter(Boolean).join(" ") ||
       (payload.name as string | undefined) ||
       null;
 
-    // OIB-derived canonical email → ista osoba uvijek mapira na istog GoTrue
-    // usera, neovisno o tome vrati li Certilia email.
-    const canonicalEmail = realEmail ?? `certilia-${oib}@users.domovina.ai`;
+    // Canonical email preko Certilia `sub` (stabilan, NE-osjetljiv) — NE OIB.
+    // OIB se NIKAD ne stavlja u auth.users.email (curenje plaintext PII-a).
+    const canonicalEmail = realEmail ?? `certilia-${sub}@users.domovina.ai`;
+    // app_metadata drži samo ne-osjetljivo; OIB ide isključivo enkriptiran u
+    // public.identity_verifications.
     const appMeta = {
-      oib,
-      certilia_sub: payload.sub,
+      provider: "certilia",
+      kyc_verified: true,
       full_name: fullName,
       real_email: realEmail ?? null,
-      provider: "certilia",
     };
 
     // 3. Upsert GoTrue user keyed po canonicalEmail.
@@ -93,10 +104,25 @@ Deno.serve(async (req) => {
     });
     if (lErr) return json({ error: "link_failed", detail: lErr.message }, 400);
     userId ??= link?.user?.id;
+    if (!userId) return json({ error: "no_user_id" }, 400);
 
-    // Osvježi app_metadata za postojećeg usera (npr. promjena imena/emaila).
-    if (userId) {
-      await admin.auth.admin.updateUserById(userId, { app_metadata: appMeta });
+    await admin.auth.admin.updateUserById(userId, { app_metadata: appMeta });
+
+    // 5. KYC: spremi verificirani minimum (OIB enkriptiran pgcrypto-om).
+    const { error: kErr } = await admin.rpc("upsert_identity_verification", {
+      p_user_id: userId,
+      p_oib: oib,
+      p_first: firstName ?? null,
+      p_last: lastName ?? null,
+      p_dob: dob ?? null,
+      p_country: country ?? null,
+      p_key: KYC_ENCRYPTION_KEY,
+      p_provider: "certilia",
+      p_loa: (payload.acr as string | undefined) ?? null,
+    });
+    if (kErr) {
+      console.error("upsert_identity_verification failed", kErr.message);
+      return json({ error: "kyc_store_failed", detail: kErr.message }, 400);
     }
 
     return json({
