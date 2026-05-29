@@ -6,7 +6,7 @@ Status: backend production-ready za MVP. Sve niže su poboljšanja / sljedeće f
 
 ## Hot path (blokira ili usporava Flutter integraciju)
 
-- [ ] **Coolify API token re-issue** (read+write+manage perms) — odblokira `scripts/coolify-env-get.sh` i automation. Currently 403 na GET. Vidi [[feedback-coolify-api]].
+- [ ] **Coolify API token re-issue** (read+write+deploy perms) — currently 403. Token ide u `.local-secrets.env` → `COOLIFY_API_TOKEN` (pod navodnicima). **Unlock za full API-driven ops:** `coolify-env-apply.sh` (bulk env preko API + post-verify) i ostatak `coolify-*.sh`. Vidi [[feedback-coolify-api]]. (`ops-verify.sh` radi i bez tokena — preko SSH.)
 - [ ] **Verify `ADDITIONAL_REDIRECT_URLS` u GoTrue env** — nakon što token bude funkcionalan. Mora uključivati `https://domovina.ai/**`, `https://domovina.energy/**`, `https://domovina.tv/**`, `http://localhost:3000/**`, `http://localhost:5173/**` + `/auth/callback` paths kad se uvede.
 - [ ] **Deep link u allow list (Coolify UI)** — dodati `ai.domovina://auth/callback` u `GOTRUE_URI_ALLOW_LIST` **i** `ADDITIONAL_REDIRECT_URLS`, pa restart auth. Repo (`config.toml`, `.env.example`) već ima; live čeka jer je Coolify token 403. Bez ovoga mobile/TV OAuth callback ne radi.
 - [ ] **DMARC update** — `_dmarc.domovina.ai` trenutno pokazuje na stari Brevo (`rua@dmarc.brevo.com`). Treba: `v=DMARC1; p=quarantine; rua=mailto:ms@domovina.tv` (preporuka Resenda). DNS only zapis.
@@ -45,6 +45,7 @@ Status: backend production-ready za MVP. Sve niže su poboljšanja / sljedeće f
 
 ## Reference
 
+- Ops automation: `coolify-env-merge.sh` (build bundle) → `coolify-env-apply.sh` (API apply+verify) → `coolify-restart.sh` → `ops-verify.sh` (health). `deploy-functions.sh` za edge fn.
 - Secret rotation runbook + rotation queue: `docs/secret-rotation.md`
 - Status checklist u `docs/deployment-runbook.md` (one-shot deploy)
 - Setup guides u `docs/setup-guides/`
