@@ -45,7 +45,7 @@ Status: backend production-ready za MVP. Sve niže su poboljšanja / sljedeće f
 
 ## Reference
 
-- Ops automation: `coolify-env-merge.sh` (build bundle) → `coolify-env-apply.sh` (API apply+verify) → `coolify-restart.sh` → `ops-verify.sh` (health). `deploy-functions.sh` za edge fn.
+- Ops automation: `deploy.sh` (orkestrira cijeli krug: stamp → functions → [--full-redeploy] → verify). Pojedinačno: `coolify-env-merge.sh` → `coolify-env-apply.sh` → `coolify-restart.sh` → `ops-verify.sh`; `deploy-functions.sh` (edge fn); `stamp-deploy.sh` (DEPLOY_GIT_* commit stamp u Coolify env).
 - Security hardening / defense layers: `docs/security-hardening.md` (Coolify API IP allowlist, CF WAF/Access, Kong, RLS, JWT)
 - Secret rotation runbook + rotation queue: `docs/secret-rotation.md`
 - Status checklist u `docs/deployment-runbook.md` (one-shot deploy)
