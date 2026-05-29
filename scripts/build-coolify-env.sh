@@ -154,6 +154,11 @@ ENABLE_PHONE_AUTOCONFIRM=false
 # --- Google OAuth ---
 GOTRUE_EXTERNAL_GOOGLE_ENABLED=true
 GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI=https://api.domovina.ai/auth/v1/callback
+# --- Apple OAuth (web/PWA, Services ID flow) ---
+# CLIENT_ID (Services ID) + SECRET (ES256 JWT, ≤6mj) dolaze iz .local-secrets.env.
+# Secret generiraj: node scripts/gen-apple-secret.mjs (vidi docs/setup-guides/apple-oauth.md).
+GOTRUE_EXTERNAL_APPLE_ENABLED=true
+GOTRUE_EXTERNAL_APPLE_REDIRECT_URI=https://api.domovina.ai/auth/v1/callback
 # --- Studio brand ---
 STUDIO_DEFAULT_ORGANIZATION=Domovina
 STUDIO_DEFAULT_PROJECT=domovina-api

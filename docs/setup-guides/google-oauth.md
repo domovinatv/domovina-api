@@ -115,6 +115,6 @@ order by a.created_at desc limit 5;
 - **`oauth_provider_not_supported`**: GoTrue env `GOTRUE_EXTERNAL_GOOGLE_ENABLED` nije `true` ili container nije recreated nakon env update-a.
 - **App stuck na Google login redirect**: provjeri `GOTRUE_SITE_URL=https://domovina.ai` u Coolify env. Inače GoTrue ne zna gdje vratiti korisnika.
 
-## Apple OAuth (kasnije)
+## Apple OAuth
 
-Apple OAuth treba Apple Developer account ($99/god), Sign in with Apple capability, certificate JWT auth. Ostavljamo dok ne kreneš prema iOS App Store releasu.
+Vidi [apple-oauth.md](apple-oauth.md) — Services ID + Key (.p8) + ES256 secret JWT (web + native).
