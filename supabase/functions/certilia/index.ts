@@ -40,6 +40,20 @@ async function getOidc() {
   return { jwks: _jwks, issuer: _issuer };
 }
 
+// Stabilan, ne-reverzibilan hex digest (HMAC-SHA256) — za email lokalni dio
+// kad eID ne vrati pravi email (sub JE OIB, ne smije se koristiti direktno).
+async function hmacHex(value: string, key: string): Promise<string> {
+  const k = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(value));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -64,8 +78,10 @@ Deno.serve(async (req) => {
     }
 
     // 2. Trusted claimovi — verificirani MINIMUM (čl. 5(1)(c) data minimization).
-    const sub = payload.sub as string;
-    const oib = (payload.oib ?? payload.pin) as string | undefined;
+    // Hrvatska e-Osobna (Certilia): OIB stiže kao `sub` (11 znamenki), NE kao
+    // `pin`. Certilia ne stavlja `pin` u id_token ni uz `claims` param, a
+    // userinfo (gdje bi `pin` živio) traži token binding koji prod ne podržava.
+    const oib = (payload.pin ?? payload.oib ?? payload.sub) as string | undefined;
     if (!oib) return json({ error: "no_oib_claim" }, 400);
     const firstName = (payload.given_name ?? payload.firstname) as string | undefined;
     const lastName = (payload.family_name ?? payload.lastname) as string | undefined;
@@ -80,9 +96,11 @@ Deno.serve(async (req) => {
       (payload.name as string | undefined) ||
       null;
 
-    // Canonical email preko Certilia `sub` (stabilan, NE-osjetljiv) — NE OIB.
     // OIB se NIKAD ne stavlja u auth.users.email (curenje plaintext PII-a).
-    const canonicalEmail = realEmail ?? `certilia-${sub}@users.domovina.ai`;
+    // Kako je `sub` ZAPRAVO OIB, ni njega ne koristimo direktno — bez pravog
+    // emaila deriviramo stabilan, ne-reverzibilan lokalni dio iz HMAC(oib).
+    const canonicalEmail = realEmail ??
+      `certilia-${(await hmacHex(oib, KYC_ENCRYPTION_KEY)).slice(0, 32)}@users.domovina.ai`;
     // app_metadata drži samo ne-osjetljivo; OIB ide isključivo enkriptiran u
     // public.identity_verifications.
     const appMeta = {
