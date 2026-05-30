@@ -4,14 +4,28 @@
 
 project_id = "domovina-api"
 
+# Dedicated 553xx port block (not the CLI defaults 5432x) so this local stack
+# coexists with other local Supabase projects on the same machine without port
+# collisions. major_version 15 mirrors the Coolify prod Postgres.
+
 [db]
-port = 54322
-shadow_port = 54320
+port = 55322
+shadow_port = 55320
 major_version = 15
 
 [api]
-schemas = ["public", "domovina_ai", "storage", "graphql_public"]
+port = 55321
+schemas = ["public", "domovina_ai", "pinka_finance", "storage", "graphql_public"]
 extra_search_path = ["public", "extensions"]
+
+[studio]
+port = 55323
+
+[inbucket]
+port = 55324
+
+[analytics]
+port = 55327
 
 [auth]
 site_url = "https://domovina.ai"
@@ -23,7 +37,11 @@ additional_redirect_urls = [
   "https://domovina.tv",
   "https://www.domovina.tv",
   "http://localhost:3000",
+  "http://localhost:3000/**",
+  "http://localhost:3007",
+  "http://localhost:3007/**",
   "http://localhost:5173",
+  "http://localhost:5173/**",
   "ai.domovina://auth/callback",
 ]
 jwt_expiry = 3600
