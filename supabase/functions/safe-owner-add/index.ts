@@ -52,9 +52,14 @@ Deno.serve(async (req) => {
       if (ageDays >= REVERIFY_DAYS) return json({ ok: false, error: "reverify_needed" }, 200);
     }
 
-    //    c) KYC (app_metadata.kyc_verified)
-    const kyc = (user.app_metadata as Record<string, unknown> | undefined)?.kyc_verified;
-    if (kyc !== true) return json({ ok: false, error: "not_eligible" }, 200);
+    //    c) KYC (kyc_verified) — čitaj AUTORITATIVNO iz baze preko admina, NE
+    //    iz getUser() tokena: password-grant/anon JWT ne odražava kyc_verified
+    //    koji Certilia upiše naknadno (updateUserById), pa bi token mintan prije
+    //    toga lažno prošao/pao gate.
+    const { data: full } = await admin.auth.admin.getUserById(user.id);
+    const kyc = (full?.user?.app_metadata as Record<string, unknown> | undefined)
+      ?.kyc_verified;
+    if (kyc !== true) return json({ ok: false, error: "kyc_required" }, 200);
 
     //    d) adresa registrirana kod ovog usera
     const { data: wallet } = await admin.schema("domovina_ai").from("owner_wallets")
