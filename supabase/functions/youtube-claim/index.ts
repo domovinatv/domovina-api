@@ -177,7 +177,9 @@ async function exchangeCode(code: string, verifier: string) {
   return await res.json();
 }
 
-async function listMyChannels(accessToken: string) {
+async function listMyChannels(
+  accessToken: string,
+): Promise<Array<{ id: string; title: string | null }>> {
   const res = await fetch(
     "https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true",
     { headers: { Authorization: `Bearer ${accessToken}` } },
