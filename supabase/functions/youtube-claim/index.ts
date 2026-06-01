@@ -44,6 +44,7 @@ Deno.serve(async (req) => {
     if (sub === "start") return await handleStart(req);
     if (sub === "callback") return await handleCallback(req);
     if (sub === "reverify") return await handleReverify(req);
+    if (sub === "revoke") return await handleRevoke(req);
     return json({ error: "unknown_route" }, 404);
   } catch (e) {
     console.error("youtube-claim error", sub, e);
@@ -157,6 +158,30 @@ async function handleReverify(req: Request) {
   // ovoj verziji) — vrati reason koji klijent mapira na "pokreni start ponovo".
   // Status ostaje verified dok se ne dokaže suprotno; klijent inicira /start.
   return json({ ok: false, error: "reverify_requires_consent", claim }, 200);
+}
+
+// ── revoke ────────────────────────────────────────────────────────────────────
+// Vlasnik otkvači (odriče se) vlastitog claima. Soft-revoke: status='revoked'
+// (čuva audit; oslobađa one_primary_per_channel partial unique → kanal opet
+// claimable). account_id check = dokaz vlasništva nad redom.
+async function handleRevoke(req: Request) {
+  const user = await getUser(req);
+  if (!user || user.is_anonymous) return json({ error: "not_signed_in" }, 401);
+
+  const { claimId } = await req.json().catch(() => ({}));
+  if (!claimId) return json({ ok: false, error: "missing_params" }, 400);
+
+  const { data: claim, error } = await admin.schema("domovina_ai")
+    .from("channel_claims")
+    .update({ status: "revoked" })
+    .eq("id", claimId)
+    .eq("account_id", user.id)
+    .neq("status", "revoked")
+    .select()
+    .maybeSingle();
+  if (error) return json({ ok: false, error: "revoke_failed", detail: error.message }, 500);
+  if (!claim) return json({ ok: false, error: "not_found" }, 404);
+  return json({ ok: true, claim }, 200);
 }
 
 // ── Google OAuth helpers ──────────────────────────────────────────────────────
