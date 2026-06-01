@@ -1,6 +1,6 @@
 # Supabase verzije — prod (Coolify) vs lokal (CLI)
 
-> Auto-generirano: `scripts/supabase-versions.sh --write` · snapshot 2026-06-01 09:53Z
+> Auto-generirano: `scripts/supabase-versions.sh --write` · snapshot 2026-06-01 09:57Z
 >
 > **Coolify NE auto-update-a Supabase.** Pri deployu snapshotira docker-compose;
 > redeploy povlači iste pinane tagove. Update = ručno u Coolifyju (bumpaj template /
@@ -27,22 +27,22 @@
 | supavisor | `supabase/supavisor:2.7.4` |
 | vector | `timberio/vector:0.53.0-alpine` |
 
-## LOKAL — Supabase CLI `2.22.4`
+## LOKAL — Supabase CLI `2.103.0`
 
 | servis | image:tag |
 |---|---|
-| analytics | `public.ecr.aws/supabase/logflare:1.12.0` |
-| auth | `public.ecr.aws/supabase/gotrue:v2.171.0` |
-| db | `public.ecr.aws/supabase/postgres:15.8.1.069` |
-| edge_runtime | `public.ecr.aws/supabase/edge-runtime:v1.67.4` |
+| analytics | `public.ecr.aws/supabase/logflare:1.42.0` |
+| auth | `public.ecr.aws/supabase/gotrue:v2.189.0` |
+| db | `public.ecr.aws/supabase/postgres:15.8.1.085` |
+| edge_runtime | `public.ecr.aws/supabase/edge-runtime:v1.74.0` |
 | inbucket | `public.ecr.aws/supabase/mailpit:v1.22.3` |
 | kong | `public.ecr.aws/supabase/kong:2.8.1` |
-| pg_meta | `public.ecr.aws/supabase/postgres-meta:v0.88.9` |
-| realtime | `public.ecr.aws/supabase/realtime:v2.34.47` |
-| rest | `public.ecr.aws/supabase/postgrest:v12.2.10` |
-| storage | `public.ecr.aws/supabase/storage-api:v1.22.3` |
-| studio | `public.ecr.aws/supabase/studio:2025.04.21-sha-173cc56` |
-| vector | `public.ecr.aws/supabase/vector:0.28.1-alpine` |
+| pg_meta | `public.ecr.aws/supabase/postgres-meta:v0.96.6` |
+| realtime | `public.ecr.aws/supabase/realtime:v2.102.1` |
+| rest | `public.ecr.aws/supabase/postgrest:v14.12` |
+| storage | `public.ecr.aws/supabase/storage-api:v1.60.2` |
+| studio | `public.ecr.aws/supabase/studio:2026.05.25-sha-65c570e` |
+| vector | `public.ecr.aws/supabase/vector:0.53.0-alpine` |
 
 ## Refresh
 
