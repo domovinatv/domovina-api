@@ -159,6 +159,10 @@ GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI=https://api.domovina.ai/auth/v1/callback
 # Secret generiraj: node scripts/gen-apple-secret.mjs (vidi docs/setup-guides/apple-oauth.md).
 GOTRUE_EXTERNAL_APPLE_ENABLED=true
 GOTRUE_EXTERNAL_APPLE_REDIRECT_URI=https://api.domovina.ai/auth/v1/callback
+# --- youtube-claim (channel ownership; OAuth client iz GCP projekta domovina-creators) ---
+# CLIENT_ID/SECRET dolaze iz .local-secrets.env (isti client kao lokal). Ovdje samo
+# PROD redirect (NE localhost) — isti OAuth client ima oba redirecta autorizirana.
+YOUTUBE_CLAIM_REDIRECT_URI=https://domovina.ai/youtube-claim/callback
 # --- Studio brand ---
 STUDIO_DEFAULT_ORGANIZATION=Domovina
 STUDIO_DEFAULT_PROJECT=domovina-api
