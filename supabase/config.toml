@@ -76,6 +76,9 @@ verify_jwt = false   # interno getUser (anon sesija je OK); create_contribution 
 [functions.pinka-webhook]
 verify_jwt = false   # server-to-server s pay rail-a; autentikacija je svix HMAC potpis, ne JWT
 
+[functions.auth-send-email]
+verify_jwt = false   # GoTrue Send-Email hook; autentikacija je svix HMAC (SEND_EMAIL_HOOK_SECRET)
+
 [functions.youtube-claim]
 verify_jwt = false   # callback nema sesiju (OAuth code); start/reverify interno getUser
 

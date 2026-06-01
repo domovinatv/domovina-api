@@ -142,7 +142,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://api.domovina.ai
 
 # --- GoTrue SSO ---
 GOTRUE_SITE_URL=https://domovina.ai
-ADDITIONAL_REDIRECT_URLS=https://domovina.ai/**,https://www.domovina.ai/**,https://domovina.energy/**,https://www.domovina.energy/**,https://domovina.tv/**,https://www.domovina.tv/**,http://localhost:3000/**,http://localhost:5173/**,https://pinka-app.pages.dev/**,https://pinka.finance/**,https://www.pinka.finance/**,https://app.pinka.finance/**
+ADDITIONAL_REDIRECT_URLS=https://domovina.ai/**,https://www.domovina.ai/**,https://domovina.energy/**,https://www.domovina.energy/**,https://domovina.tv/**,https://www.domovina.tv/**,http://localhost:3000/**,http://localhost:5173/**,https://pinka-app.pages.dev/**,https://pinka.finance/**,https://www.pinka.finance/**,https://app.pinka.finance/**,https://pinka.io/**,https://www.pinka.io/**
 JWT_EXPIRY=3600
 DISABLE_SIGNUP=false
 ENABLE_EMAIL_SIGNUP=true
