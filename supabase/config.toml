@@ -47,6 +47,20 @@ additional_redirect_urls = [
 jwt_expiry = 3600
 enable_signup = true
 
+# Google login provider (GoTrue-native OAuth). Odvojen od youtube-claim Google
+# clienta (Princip D — vidi supabase/functions/.env). client_id/secret se
+# interpoliraju iz env-a pri `supabase start` (CLI godotenv: cwd `.env` +
+# procesni env). Vrijednosti GOTRUE_EXTERNAL_GOOGLE_* žive u .local-secrets.env;
+# `scripts/dev-local.sh` ih exporta prije start-a.
+#
+# Lokalno: u GCP OAuth clientu (GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID) mora biti
+# Authorized redirect URI = http://127.0.0.1:55321/auth/v1/callback (GoTrue
+# callback), pa GoTrue redirecta na app redirect (:5173, već u additional_*).
+[auth.external.google]
+enabled = true
+client_id = "env(GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(GOTRUE_EXTERNAL_GOOGLE_SECRET)"
+
 [functions.handoff-consume]
 verify_jwt = false   # interno verificiramo authHeader (getUser) prije consume-a
 
