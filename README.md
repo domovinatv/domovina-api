@@ -88,6 +88,12 @@ Merge layers (kasnije prepisuje ranije):
 
 Vidi [`docs/deployment-runbook.md`](docs/deployment-runbook.md) za trenutni stage i sljedeće korake.
 
+## Verzije Supabasea (lokal ↔ prod)
+
+Coolify NE auto-update-a Supabase; verzije su pinane i bumpaju se ručno. Model,
+siguran upgrade postupak i staging preporuka: [`docs/supabase-version-management.md`](docs/supabase-version-management.md).
+Živi snapshot tagova: [`docs/supabase-versions.md`](docs/supabase-versions.md) (`scripts/supabase-versions.sh --write`).
+
 ## DB migrations workflow
 
 Sav schema-as-code za `public.*` i `domovina_ai.*` živi u [`supabase/migrations/`](supabase/migrations/). App repos (`domovina.ai`, `domovina.energy`, ...) **samo konzumiraju** kroz `supabase_flutter` / `supabase-js` SDK — nikad ne definiraju schemu.
