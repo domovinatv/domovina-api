@@ -18,8 +18,11 @@ import { corsHeaders } from "../_shared/cors.ts";
 const URL_ = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
-const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!;
-const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_OAUTH_CLIENT_SECRET")!;
+// Feature-scoped naming (YOUTUBE_CLAIM_*) — u Coolify dijeljenom env poolu jasno
+// odvojeno od GoTrue Google login clienta (GOTRUE_EXTERNAL_GOOGLE_*). Dedicirani
+// client, Princip D iz plana.
+const GOOGLE_CLIENT_ID = Deno.env.get("YOUTUBE_CLAIM_GOOGLE_CLIENT_ID")!;
+const GOOGLE_CLIENT_SECRET = Deno.env.get("YOUTUBE_CLAIM_GOOGLE_CLIENT_SECRET")!;
 const REDIRECT_URI = Deno.env.get("YOUTUBE_CLAIM_REDIRECT_URI") ??
   "https://domovina.ai/youtube-claim/callback";
 
