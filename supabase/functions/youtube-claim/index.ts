@@ -129,7 +129,15 @@ async function handleCallback(req: Request) {
 
   // 4. UC… match prema ciljanom kanalu iz state-a.
   const target = mine.find((c) => c.id === st.youtube_channel_id);
-  if (!target) return json({ ok: false, error: "channel_mismatch" }, 200);
+  if (!target) {
+    // Vrati popis kanala kojima račun JEST vlasnik/manager — bolji UX nego goli
+    // "mismatch" (korisnik vidi da je login uspio, ali na krivom računu).
+    return json({
+      ok: false,
+      error: "channel_mismatch",
+      ownedChannels: mine.map((c) => ({ id: c.id, title: c.title })),
+    }, 200);
+  }
 
   // 5. Role: ako već postoji verified primary drugog accounta → collaborator.
   const googleSub = await googleSubFromIdToken(token.id_token);
