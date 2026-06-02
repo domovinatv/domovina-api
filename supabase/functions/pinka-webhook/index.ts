@@ -51,9 +51,48 @@ Deno.serve(async (req) => {
     });
   if (error) return json({ error: error.message }, 500);
 
+  // Pay-to-post link preview: only AFTER a real paid flip, if the message has a
+  // URL, fetch sanitized OG via the pay-worker (public-egress, SSRF-isolated)
+  // and store it for the wall. Best-effort — never blocks the 200.
+  if (marked === true) {
+    try {
+      await enrichLinkPreview(event.sid);
+    } catch (e) {
+      console.warn(`[pinka-webhook] og enrich failed: ${e}`);
+    }
+  }
+
   // marked=false → vec placeno (idempotentno) ili nepoznat sid; oba su 200.
   return json({ ok: true, marked: marked === true }, 200);
 });
+
+const OG_PREVIEW_URL = Deno.env.get("OG_PREVIEW_URL") ?? "https://mpt.domovina.ai/api/og-preview";
+
+async function enrichLinkPreview(sid: string) {
+  const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+  const { data } = await admin
+    .schema("pinka_finance")
+    .from("contributions")
+    .select("id, message, link_preview")
+    .eq("payment_intent_sid", sid)
+    .maybeSingle();
+  const row = data as { id?: string; message?: string | null; link_preview?: unknown } | null;
+  if (!row?.id || !row.message || row.link_preview) return; // no msg / already enriched
+  const url = row.message.match(/https?:\/\/[^\s]+/)?.[0];
+  if (!url) return;
+  const res = await fetch(OG_PREVIEW_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-og-key": SECRET },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) return;
+  const { preview } = (await res.json()) as { preview?: unknown };
+  if (!preview) return;
+  await admin.schema("pinka_finance").rpc("set_contribution_link_preview", {
+    p_contribution_id: row.id,
+    p_preview: preview,
+  });
+}
 
 function json(b: unknown, status: number) {
   return new Response(JSON.stringify(b), {
