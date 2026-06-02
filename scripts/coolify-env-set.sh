@@ -5,9 +5,15 @@
 #   ./scripts/coolify-env-set.sh KEY=VALUE
 #   ./scripts/coolify-env-set.sh KEY=VALUE -y          # bez confirmation prompta
 #   ./scripts/coolify-env-set.sh KEY=VALUE --restart   # auto-restart full stack nakon
+#   ./scripts/coolify-env-set.sh GOTRUE_X=Y --recreate-service=supabase-auth
+#                                                      # recreate SAMO tog servisa (preporučeno za
+#                                                      # single-service env, npr. GOTRUE_*) → ~5s,
+#                                                      # ne ruši cijeli stack
 #
 # Napomena: nakon promjene env-a, Coolify NE restart-a containere automatski.
-# Treba ./scripts/coolify-restart.sh ili --restart flag.
+# `--restart` = full-stack (sve gore ~2-3 min); `--recreate-service` = samo jedan
+# container pokupi novi env (~5s). Koristi --restart samo kad promjena dira više
+# servisa; inače --recreate-service.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,18 +22,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 AUTO_YES=false
 RESTART_AFTER=false
+RECREATE_SERVICE=""
 KV=""
 for arg in "$@"; do
   case "$arg" in
     -y|--yes) AUTO_YES=true ;;
     --restart) RESTART_AFTER=true ;;
+    --recreate-service=*) RECREATE_SERVICE="${arg#*=}" ;;
     --*) echo "Unknown flag: $arg" >&2; exit 2 ;;
     *) KV="$arg" ;;
   esac
 done
 
 if [ -z "$KV" ] || [[ "$KV" != *=* ]]; then
-  echo "Usage: $0 KEY=VALUE [-y] [--restart]" >&2
+  echo "Usage: $0 KEY=VALUE [-y] [--restart | --recreate-service=<svc>]" >&2
+  exit 2
+fi
+
+if $RESTART_AFTER && [ -n "$RECREATE_SERVICE" ]; then
+  echo "❌ Koristi ili --restart (full stack) ili --recreate-service=<svc>, ne oboje." >&2
   exit 2
 fi
 
@@ -96,6 +109,12 @@ case "$CODE" in
     exit 1
     ;;
 esac
+
+if [ -n "$RECREATE_SERVICE" ]; then
+  echo ""
+  echo "→ Recreate service $RECREATE_SERVICE (pokupi novi env, bez rušenja stacka)..."
+  exec "$SCRIPT_DIR/coolify-restart.sh" "$RECREATE_SERVICE" --recreate -y
+fi
 
 if $RESTART_AFTER; then
   echo ""

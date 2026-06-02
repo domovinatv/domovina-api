@@ -4,23 +4,38 @@
 # Usage:
 #   ./scripts/coolify-restart.sh                   # restart cijeli stack (Coolify API)
 #   ./scripts/coolify-restart.sh supabase-rest     # restart samo jedan subservice (docker via SSH)
+#   ./scripts/coolify-restart.sh supabase-auth --recreate   # recreate jednog servisa (pokupi novi env!)
 #   ./scripts/coolify-restart.sh -y                # bez confirmation
 #
 # Stack restart kroz Coolify API → preserva state, izvršava se serijski po subservice-u.
-# Subservice restart kroz docker (via SSH) → samo bounce jednog containera, ne mijenja config.
+# Subservice restart kroz docker (via SSH) → samo bounce jednog containera.
+#
+# VAŽNO: `docker restart` ponovno koristi STARI env (env se injecta pri KREIRANJU
+# containera). Za primjenu env-promjene na JEDNOM servisu (npr. GOTRUE_* za
+# supabase-auth) koristi `--recreate`: force-recreate kroz docker compose ponovno
+# pročita host .env (Coolify ga upiše odmah na env-set) → ~5s downtime samo tog
+# servisa, ostatak stacka netaknut. Bez `--recreate`, full-stack restart je jedini
+# način da Coolify re-injecta env svugdje (sporo, ruši sve).
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 AUTO_YES=false
+RECREATE=false
 SUBSERVICE=""
 for arg in "$@"; do
   case "$arg" in
     -y|--yes) AUTO_YES=true ;;
+    --recreate) RECREATE=true ;;
     --*) echo "Unknown flag: $arg" >&2; exit 2 ;;
     *) SUBSERVICE="$arg" ;;
   esac
 done
+
+if $RECREATE && [ -z "$SUBSERVICE" ]; then
+  echo "❌ --recreate zahtijeva ime subservice-a (npr. supabase-auth)." >&2
+  exit 2
+fi
 
 if [ -n "$SUBSERVICE" ]; then
   # ----- Subservice restart kroz SSH + docker ----------------------------
@@ -40,14 +55,38 @@ if [ -n "$SUBSERVICE" ]; then
     exit 1
   fi
 
-  echo "→ Restart subservice: $CONTAINER"
-  if ! $AUTO_YES; then
-    read -rp "Confirm? [y/N] " ans
-    [[ "$ans" == [yY]* ]] || { echo "Cancelled."; exit 0; }
+  if $RECREATE; then
+    # Force-recreate ONLY this compose service so it re-reads the host .env
+    # (Coolify writes env changes there immediately). Derives the compose
+    # project / config file / service from the running container's labels —
+    # no hardcoded UUID. Needs sudo: the compose file + .env are root-owned.
+    LABELS=$(ssh_remote "docker inspect $CONTAINER --format '{{index .Config.Labels \"com.docker.compose.project\"}}|{{index .Config.Labels \"com.docker.compose.project.config_files\"}}|{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}'")
+    PROJECT=$(echo "$LABELS" | cut -d'|' -f1)
+    CONFIG=$(echo "$LABELS"  | cut -d'|' -f2)
+    WORKDIR=$(echo "$LABELS" | cut -d'|' -f3)
+    SERVICE=$(echo "$LABELS" | cut -d'|' -f4)
+    if [ -z "$PROJECT" ] || [ -z "$CONFIG" ] || [ -z "$SERVICE" ]; then
+      echo "❌ Ne mogu pročitati compose labele s $CONTAINER (project/config/service)." >&2
+      exit 1
+    fi
+    echo "→ Recreate compose service: $SERVICE (project $PROJECT)"
+    echo "  ↳ picks up new env from $WORKDIR/.env; --no-deps ne dira db/ovisnosti"
+    if ! $AUTO_YES; then
+      read -rp "Confirm? [y/N] " ans
+      [[ "$ans" == [yY]* ]] || { echo "Cancelled."; exit 0; }
+    fi
+    ssh_remote "sudo docker compose -p '$PROJECT' -f '$CONFIG' --project-directory '$WORKDIR' up -d --no-deps --force-recreate '$SERVICE'"
+    echo "✅ $SERVICE recreated (new env applied)"
+  else
+    echo "→ Restart subservice: $CONTAINER"
+    echo "  ⚠️  plain restart NE primjenjuje env-promjene — za to koristi --recreate"
+    if ! $AUTO_YES; then
+      read -rp "Confirm? [y/N] " ans
+      [[ "$ans" == [yY]* ]] || { echo "Cancelled."; exit 0; }
+    fi
+    ssh_remote "docker restart $CONTAINER"
+    echo "✅ $CONTAINER restarted"
   fi
-
-  ssh_remote "docker restart $CONTAINER"
-  echo "✅ $CONTAINER restarted"
 else
   # ----- Full stack restart kroz Coolify API -----------------------------
   # shellcheck source=lib/coolify-api.sh
