@@ -112,6 +112,20 @@ esac
 
 if [ -n "$RECREATE_SERVICE" ]; then
   echo ""
+  # The Coolify API set the value in Coolify's DB, but the host .env (which the
+  # compose env_file reads) is only regenerated on a FULL deploy. A targeted
+  # recreate reads the on-disk .env, so we must sync the value there ourselves.
+  # shellcheck source=lib/db-env.sh
+  . "$SCRIPT_DIR/lib/db-env.sh"
+  ENVFILE="/data/coolify/services/$COOLIFY_SERVICE_UUID/.env"
+  echo "→ Sync $KEY u host $ENVFILE (Coolify API ne regenerira .env do full-deploya)..."
+  # Drop any existing line for this key (KEY is [A-Z0-9_], sed-safe), then
+  # guarantee a trailing newline BEFORE appending — a missing final newline once
+  # concatenated two vars onto one line and corrupted both.
+  ssh_remote "sudo sed -i '/^${KEY}=/d' '$ENVFILE'; [ -n \"\$(sudo tail -c1 '$ENVFILE')\" ] && printf '\\n' | sudo tee -a '$ENVFILE' >/dev/null; true"
+  # Value goes over ssh stdin (never in argv / process list).
+  printf '%s=%s\n' "$KEY" "$VALUE" | ssh_remote "sudo tee -a '$ENVFILE' >/dev/null"
+  echo "  ✓ .env synced"
   echo "→ Recreate service $RECREATE_SERVICE (pokupi novi env, bez rušenja stacka)..."
   exec "$SCRIPT_DIR/coolify-restart.sh" "$RECREATE_SERVICE" --recreate -y
 fi

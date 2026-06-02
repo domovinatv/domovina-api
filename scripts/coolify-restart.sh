@@ -13,9 +13,11 @@
 # VAŽNO: `docker restart` ponovno koristi STARI env (env se injecta pri KREIRANJU
 # containera). Za primjenu env-promjene na JEDNOM servisu (npr. GOTRUE_* za
 # supabase-auth) koristi `--recreate`: force-recreate kroz docker compose ponovno
-# pročita host .env (Coolify ga upiše odmah na env-set) → ~5s downtime samo tog
-# servisa, ostatak stacka netaknut. Bez `--recreate`, full-stack restart je jedini
-# način da Coolify re-injecta env svugdje (sporo, ruši sve).
+# pročita host .env → ~5s downtime samo tog servisa, ostatak stacka netaknut.
+# OPREZ: Coolify API (coolify-env-set) upiše var u Coolify DB, ali host .env
+# regenerira tek na FULL deploy — zato `coolify-env-set --recreate-service`
+# SAM sinkronizira var u .env prije ovog recreatea. `--recreate` čitan samostalno
+# pretpostavlja da je var već u .env.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
