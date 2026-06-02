@@ -41,7 +41,7 @@ const PINKA: Brand = {
   // From radio; do tada postavi PINKA_MAIL_FROM na verificiranu adresu.
   from: Deno.env.get("PINKA_MAIL_FROM") ?? "pinka <noreply@pinka.io>",
   accent: "#E85D5D",
-  subject: () => "Tvoja poveznica za prijavu — pinka",
+  subject: () => "Kod za prijavu — pinka",
 };
 
 function pickBrand(redirectTo: string): Brand {
@@ -68,6 +68,9 @@ Deno.serve(async (req) => {
   let payload: {
     user?: { email?: string };
     email_data?: {
+      // 6-digit OTP the user can type instead of clicking the link. GoTrue
+      // sends BOTH in the same flow; we surface the code AND keep the link.
+      token?: string;
       token_hash?: string;
       email_action_type?: string;
       redirect_to?: string;
@@ -100,7 +103,7 @@ Deno.serve(async (req) => {
       from: brand.from,
       to,
       subject: brand.subject(action),
-      html: renderEmail(brand, link),
+      html: renderEmail(brand, link, ed.token ?? ""),
     }),
   });
 
@@ -112,12 +115,21 @@ Deno.serve(async (req) => {
   return json({}, 200);
 });
 
-function renderEmail(brand: Brand, link: string): string {
+function renderEmail(brand: Brand, link: string, code: string): string {
+  // Code block only when GoTrue supplied an OTP (it does for magiclink/email
+  // OTP). The clickable link is always present as a fallback.
+  const codeBlock = code
+    ? `<p style="color:#6B6B6B;line-height:1.6;margin:0 0 12px">Upiši ovaj kod u aplikaciji:</p>
+    <div style="font-family:'SFMono-Regular',Consolas,Menlo,monospace;font-size:34px;font-weight:700;letter-spacing:10px;color:${brand.accent};background:#fff;border:1px solid #00000010;border-radius:12px;padding:18px 8px;text-align:center;margin:0 0 8px">${code}</div>
+    <p style="color:#9b9b9b;font-size:12px;line-height:1.6;margin:0 0 28px">Kod vrijedi kratko i može se iskoristiti jednom.</p>
+    <p style="color:#9b9b9b;font-size:12px;margin:0 0 12px">— ili —</p>`
+    : "";
   return `<!doctype html><html><body style="margin:0;background:#FBF8F3;font-family:Inter,Segoe UI,Arial,sans-serif;color:#1A1A1A">
   <div style="max-width:480px;margin:0 auto;padding:40px 24px">
     <p style="font-size:24px;font-weight:700;margin:0 0 8px;color:${brand.accent}">${brand.name}</p>
-    <h1 style="font-size:20px;margin:24px 0 8px">Prijava jednim klikom</h1>
-    <p style="color:#6B6B6B;line-height:1.6;margin:0 0 24px">Klikni gumb da se prijaviš. Poveznica vrijedi kratko i može se iskoristiti jednom.</p>
+    <h1 style="font-size:20px;margin:24px 0 16px">Prijava</h1>
+    ${codeBlock}
+    <p style="color:#6B6B6B;line-height:1.6;margin:0 0 16px">Klikni gumb da se prijaviš:</p>
     <a href="${link}" style="display:inline-block;background:${brand.accent};color:#fff;text-decoration:none;padding:14px 28px;border-radius:9999px;font-weight:600">Prijavi se</a>
     <p style="color:#9b9b9b;font-size:12px;line-height:1.6;margin:28px 0 0">Ako gumb ne radi, kopiraj ovu poveznicu:<br><span style="word-break:break-all">${link}</span></p>
     <p style="color:#bdbdbd;font-size:12px;margin:24px 0 0">Ako nisi ti zatražio/la prijavu, slobodno zanemari ovaj mail.</p>
