@@ -8,6 +8,7 @@
 #   4. [--full-redeploy]   — coolify-restart.sh (restart cijelog stacka; treba ako su se
 #                            mijenjale app-env vrijednosti da dođu do containera)
 #   5. ops-verify.sh       — health (containeri + auth/rest/edge probe-ovi)
+#   6. deploy-journal.sh   — zapiše neovisan deploy milestone (deploys/) + commit
 #
 # Guardrail: confirm na početku (osim -y). Edge restart je par sekundi; --full-redeploy
 # ruši cijeli stack nakratko (potvrdi zasebno).
@@ -18,6 +19,7 @@
 #   ./scripts/deploy.sh --dry-run       # ništa live; pokaži plan + ops-verify
 #   ./scripts/deploy.sh --full-redeploy # + restart cijelog stacka
 #   ./scripts/deploy.sh --skip-functions
+#   ./scripts/deploy.sh --no-journal    # preskoči zapis milestone-a
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,13 +29,15 @@ AUTO_YES=false
 DRY_RUN=false
 FULL_REDEPLOY=false
 SKIP_FUNCTIONS=false
+NO_JOURNAL=false
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)          AUTO_YES=true ;;
     --dry-run)         DRY_RUN=true ;;
     --full-redeploy)   FULL_REDEPLOY=true ;;
     --skip-functions)  SKIP_FUNCTIONS=true ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    --no-journal)      NO_JOURNAL=true ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -95,9 +99,23 @@ else
   echo ""; echo "── [3/4] full stack restart preskočen (--full-redeploy za to) ──"
 fi
 
-# 5. verify
-echo ""; echo "── [4/4] ops-verify ──"
-"$SCRIPT_DIR/ops-verify.sh"
+# 5. verify (uhvati rezultat — NE aborta-j, da se i neuspješan deploy zapiše)
+echo ""; echo "── [4/5] ops-verify ──"
+if "$SCRIPT_DIR/ops-verify.sh"; then OPS_RESULT=PASS; else OPS_RESULT=FAIL; fi
+
+# 6. journal — neovisan deploy milestone za regresiju
+if ! $NO_JOURNAL; then
+  echo ""; echo "── [5/5] deploy-journal ──"
+  "$SCRIPT_DIR/deploy-journal.sh" --ops-result "$OPS_RESULT" --commit || \
+    echo "⚠️  journaling nije uspio (deploy sam je OK; zapiši ručno: ./scripts/deploy-journal.sh)."
+else
+  echo ""; echo "── [5/5] deploy-journal preskočen (--no-journal) ──"
+fi
 
 echo ""
-echo "✅ deploy krug gotov (commit $SHORT)."
+if [ "$OPS_RESULT" = PASS ]; then
+  echo "✅ deploy krug gotov (commit $SHORT, ops:PASS)."
+else
+  echo "⚠️  deploy krug gotov ALI ops-verify=FAIL (commit $SHORT) — vidi milestone u deploys/."
+  exit 1
+fi
