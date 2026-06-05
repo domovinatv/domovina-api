@@ -14,6 +14,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SECRET = Deno.env.get("INTENT_WEBHOOK_SECRET") ?? "";
+// Salt for hashing the SEPA sender IBAN (same key as Certilia OIB encryption).
+// Optional — if unset, the payer_iban_hash is simply skipped.
+const KYC_KEY = Deno.env.get("KYC_ENCRYPTION_KEY") ?? null;
 const TOLERANCE_SECONDS = 300; // 5 min replay window
 
 Deno.serve(async (req) => {
@@ -51,6 +54,9 @@ Deno.serve(async (req) => {
         p_monerium_order_id: event.monerium_order_id,
         p_amount_cents: event.amount_received_cents ?? null,
         p_tx_hash: event.forward_tx_hash ?? null,
+        p_sender_iban: event.sender_iban ?? null,
+        p_sender_name: event.sender_name ?? null,
+        p_key: KYC_KEY,
       });
     if (error) return json({ error: error.message }, 500);
     const row = Array.isArray(data) ? data[0] : data;
@@ -69,6 +75,9 @@ Deno.serve(async (req) => {
       p_sid: event.sid,
       p_tx_hash: event.forward_tx_hash ?? null,
       p_amount_received_cents: event.amount_received_cents ?? null,
+      p_sender_iban: event.sender_iban ?? null,
+      p_sender_name: event.sender_name ?? null,
+      p_key: KYC_KEY,
     });
   if (error) return json({ error: error.message }, 500);
 
