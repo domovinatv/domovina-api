@@ -36,6 +36,27 @@ Deno.serve(async (req) => {
   if (!ok) return json({ error: "bad_signature" }, 401);
 
   const event = JSON.parse(raw);
+
+  // Permanent campaign QR (`cmp:` rail protocol): each Monerium order is a
+  // distinct contribution, keyed/idempotent on monerium_order_id.
+  if (event.type === "contribution.sepa") {
+    if (!event.campaign_id || !event.monerium_order_id) {
+      return json({ error: "missing_campaign_or_order" }, 400);
+    }
+    const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+    const { data, error } = await admin
+      .schema("pinka_finance")
+      .rpc("record_sepa_contribution", {
+        p_campaign_id: event.campaign_id,
+        p_monerium_order_id: event.monerium_order_id,
+        p_amount_cents: event.amount_received_cents ?? null,
+        p_tx_hash: event.forward_tx_hash ?? null,
+      });
+    if (error) return json({ error: error.message }, 500);
+    const row = Array.isArray(data) ? data[0] : data;
+    return json({ ok: true, created: (row as { created?: boolean } | null)?.created === true }, 200);
+  }
+
   if (event.type !== "intent.paid") {
     return json({ ok: true, ignored: event.type }, 200);
   }
