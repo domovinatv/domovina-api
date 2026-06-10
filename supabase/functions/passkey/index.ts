@@ -168,7 +168,16 @@ async function registerStart(req: Request) {
     excludeCredentials,
     authenticatorSelection: {
       residentKey: "required",        // discoverable → passwordless returning login
-      userVerification: "preferred",
+      // Best practices preuzete iz pay.domovina.ai/wallet (passkey.ts):
+      // - userVerification required → Face ID / otisak obavezan (pravi
+      //   hardware-backed potpis, ne samo klik u extension popup-u)
+      // - authenticatorAttachment platform → native synced store (Apple
+      //   Passwords / Google PM); gasi USB ključeve i cross-device hybrid.
+      //   NAPOMENA: NE gasi OS-registrirane 3rd-party managere (LastPass,
+      //   1Password) — WebAuthn RP-u ne daje filter; to korisnik bira u OS
+      //   postavkama (vidi provider hint u Moj račun).
+      userVerification: "required",
+      authenticatorAttachment: "platform",
     },
   });
 
@@ -248,7 +257,7 @@ async function loginStart(req: Request) {
 
   const options = await generateAuthenticationOptions({
     rpID,
-    userVerification: "preferred",
+    userVerification: "required",   // Face ID / otisak i na loginu (vidi registerStart)
     allowCredentials: [],   // discoverable — autentifikator nudi resident credential
   });
 
