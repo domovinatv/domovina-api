@@ -28,10 +28,12 @@ const RP_NAME = "DOMOVINA.ai";
 
 // Dopušteni RP ID-evi i origini. Web prod + localhost dev. Native (iOS/Android)
 // koristi origin formate koje @simplewebauthn prepoznaje preko AASA/assetlinks.
-const KNOWN_RP_IDS = new Set(["domovina.ai", "localhost"]);
+const KNOWN_RP_IDS = new Set(["domovina.ai", "pinka.io", "localhost"]);
 const EXTRA_ORIGINS = [
   "https://domovina.ai",
   "https://www.domovina.ai",
+  "https://pinka.io",
+  "https://www.pinka.io",
   "http://localhost:5173",
   "http://localhost:3000",
   // Android Credential Manager origin (apk-key-hash) i iOS app origin dopušteni
@@ -86,6 +88,7 @@ function resolveRpId(req: Request, bodyRpId?: string): string {
     const host = new URL(origin).hostname;
     if (host === "localhost" || host === "127.0.0.1") return "localhost";
     if (host.endsWith("domovina.ai")) return "domovina.ai";
+    if (host.endsWith("pinka.io")) return "pinka.io";
   } catch (_) { /* ignore */ }
   return "domovina.ai";
 }
@@ -375,6 +378,11 @@ async function loadChallenge(challenge: string, kind: "register" | "login") {
 // redirectTo za action_link: web ostaje na origin/auth/callback, native deep link.
 function deepLinkRedirect(req: Request): string {
   const origin = req.headers.get("Origin");
+  // pinka.io je statički SPA bez /auth/callback rute → action_link fallback
+  // vodi na /dashboard (klijent primarno koristi email_otp, bez redirecta).
+  if (origin && /^https:\/\/(www\.)?pinka\.io$/.test(origin)) {
+    return `${origin}/dashboard`;
+  }
   if (origin && /^https?:\/\/(localhost|127\.0\.0\.1|.*domovina\.ai)/.test(origin)) {
     return `${origin}/auth/callback`;
   }
