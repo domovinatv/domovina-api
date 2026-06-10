@@ -84,3 +84,6 @@ verify_jwt = false   # callback nema sesiju (OAuth code); start/reverify interno
 
 [functions.safe-owner-add]
 verify_jwt = false   # interno getUser + eligibility re-check (ownership∧KYC∧svježina)
+
+[functions.account-delete]
+verify_jwt = false   # interno getUser (permanent check); briše auth.users preko admin API-ja

@@ -55,6 +55,10 @@ Deno.serve(async (req) => {
         return await loginStart(req);
       case "/login/finish":
         return await loginFinish(req);
+      case "/list":
+        return await listPasskeys(req);
+      case "/delete":
+        return await deletePasskey(req);
       default:
         return json({ error: "not_found", path }, 404);
     }
@@ -303,6 +307,47 @@ async function loginFinish(req: Request) {
 
   const session = await mintSession(email, deepLinkRedirect(req));
   return json({ ...session, email, user_id: stored.user_id }, 200);
+}
+
+// --- account management (Moj račun) -------------------------------------------
+// Spec: domovina.ai docs/backend-prompts/10-account-management.md.
+// verify_jwt=false na funkciji (login grane) → ove grane ručno traže
+// PERMANENT signed-in usera iz Authorization headera (maybeUser).
+
+async function listPasskeys(req: Request) {
+  const user = await maybeUser(req);
+  if (!user) return json({ error: "unauthorized" }, 401);
+
+  const { data, error } = await admin
+    .from("user_passkeys")
+    .select("id, device_name, created_at, last_used_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+
+  return json({ passkeys: data ?? [] }, 200);
+}
+
+async function deletePasskey(req: Request) {
+  const user = await maybeUser(req);
+  if (!user) return json({ error: "unauthorized" }, 401);
+
+  const { id } = await req.json().catch(() => ({}));
+  if (!id) return json({ error: "missing_params" }, 400);
+
+  // user_id guard: korisnik smije brisati SAMO svoje passkeyje. Namjerno ne
+  // blokiramo brisanje zadnjeg — prijava magic linkom/OAuth-om uvijek ostaje.
+  // Row-not-found je 400 (ne 404): klijent 404 tumači kao "grana ne postoji".
+  const { data, error } = await admin
+    .from("user_passkeys")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("id");
+  if (error) throw error;
+  if (!data?.length) return json({ error: "not_found" }, 400);
+
+  return json({ ok: true }, 200);
 }
 
 // --- shared ------------------------------------------------------------------
