@@ -99,7 +99,9 @@ fi
 
 echo "→ upload patched composea + recreate samo supabase-storage" >&2
 B64_LIVE=$(base64 < "/tmp/compose-live-patched-$TS.yml" | tr -d '\n')
-ssh_remote "echo $B64_LIVE | base64 -d | sudo tee $COMPOSE_PATH >/dev/null && cd /data/coolify/services/$SERVICE_UUID_PATH && sudo docker compose up -d supabase-storage"
+# --project-directory: ssh user ne smije cd-ati u root-owned dir; compose tako
+# svejedno pokupi .env iz service dira i ostane u istom compose projektu
+ssh_remote "echo $B64_LIVE | base64 -d | sudo tee $COMPOSE_PATH >/dev/null && sudo docker compose --project-directory /data/coolify/services/$SERVICE_UUID_PATH -f $COMPOSE_PATH up -d supabase-storage"
 
 echo "→ trajni patch u coolify DB" >&2
 B64_RAW=$(base64 < "/tmp/compose-raw-patched-$TS.yml" | tr -d '\n')
