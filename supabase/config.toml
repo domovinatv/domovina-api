@@ -87,3 +87,6 @@ verify_jwt = false   # interno getUser + eligibility re-check (ownership∧KYC�
 
 [functions.account-delete]
 verify_jwt = false   # interno getUser (permanent check); briše auth.users preko admin API-ja
+
+[functions.revenuecat-webhook]
+verify_jwt = false   # server-to-server iz RevenueCata; autentikacija je shared secret (REVENUECAT_WEBHOOK_AUTH), ne JWT
