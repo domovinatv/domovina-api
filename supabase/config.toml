@@ -90,3 +90,15 @@ verify_jwt = false   # interno getUser (permanent check); briše auth.users prek
 
 [functions.revenuecat-webhook]
 verify_jwt = false   # server-to-server iz RevenueCata; autentikacija je shared secret (REVENUECAT_WEBHOOK_AUTH), ne JWT
+
+[functions.events-order]
+verify_jwt = false   # wallet je self-custody bez GoTrue sesije; order UUID = idempotency + bearer capability, validacija u RPC-u
+
+[functions.events-confirm]
+verify_jwt = false   # onchain verifikacija JE autorizacija (pinka-onchain-confirm obrazac, vezano uz narudžbu)
+
+[functions.events-tickets]
+verify_jwt = false   # autorizacija = posjedovanje order UUID-ova (bearer capability, kao contribution_status)
+
+[functions.events-feed]
+verify_jwt = false   # javni discovery feed (public kampanje type=tickets + tieri; bez PII)
