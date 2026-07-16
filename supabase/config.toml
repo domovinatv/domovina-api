@@ -105,3 +105,6 @@ verify_jwt = false   # javni discovery feed (public kampanje type=tickets + tier
 
 [functions.events-checkin]
 verify_jwt = false   # interno getUser; autorizacija = has_role_on_account admin u redeem_ticket RPC-u
+
+[functions.events-organizer]
+verify_jwt = false   # interno getUser; autorizacija = org admin u RPC-ima (create/update INVOKER + RLS, publish DEFINER + allowlist)

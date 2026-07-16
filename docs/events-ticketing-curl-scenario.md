@@ -1,14 +1,19 @@
-# Događaji (E2+E3) — curl test scenarij
+# Događaji (E2+E3+E4) — curl test scenarij
 
 > Reference: safe-wallet-monorepo `docs/whitelabel-wallet/11-dogadjaji-p2p-ticketing.md` +
-> `handoffs/dogadjaji-2-backend.md` + `handoffs/dogadjaji-3-qr-checkin.md`.
-> Migracije: `20260716120000/120100/120200_events_ticketing_*`, `20260717120000_events_checkin`.
-> Funkcije: `events-order`, `events-confirm`, `events-tickets`, `events-feed`, `events-checkin`.
+> `handoffs/dogadjaji-2-backend.md` + `handoffs/dogadjaji-3-qr-checkin.md` +
+> `handoffs/dogadjaji-4-organizator.md`.
+> Migracije: `20260716120000/120100/120200_events_ticketing_*`, `20260717120000_events_checkin`,
+> `20260717130000_events_organizer`.
+> Funkcije: `events-order`, `events-confirm`, `events-tickets`, `events-feed`,
+> `events-checkin`, `events-organizer`.
 >
 > Scenarij pokriva kriterije prihvaćanja E2: create_event → order (rezervacija) →
 > onchain confirm → paid + N ulaznica; idempotencija; oversell odbijen; TTL istek
-> oslobađa rezervaciju; imenska bez imena odbijena. E3 (§8): check-in — prvi sken
-> ✅, drugi sken istog QR-a ⛔ s vremenom prvog ulaska; ne-admin odbijen.
+> oslobađa rezervaciju; imenska bez imena odbijena. E3 (§7): check-in — prvi sken
+> ✅, drugi sken istog QR-a ⛔ s vremenom prvog ulaska; ne-admin odbijen. E4 (§9):
+> organizator self-service — draft bez Safe-a, publish gating (allowlist + Safe,
+> server-side), update/tier lock, DAC7 zapis (RLS), feed filtriranje/paginacija.
 
 ## 0. Okruženje
 
@@ -266,14 +271,120 @@ select * from pinka_finance.contribution_events
  order by created_at desc;
 ```
 
+## 9. Organizator self-service (E4)
+
+`events-organizer` traži GoTrue JWT (isti "pristupni token" obrazac kao
+events-checkin); autorizacija je server-side u RPC-ima: `create_event`/
+`update_event` su INVOKER (RLS: org admin + KYC), `publish_event` je DEFINER
+(org admin + **allowlist** + pravi Safe). Jedna funkcija, POST s `action` poljem.
+
+```bash
+# JWT org admina (v. §7); org account mora imati admin membership + KYC zapis.
+export ADMIN_JWT=…
+export ORG=aaaaaaaa-….   # org account id
+export EV=$(uuidgen | tr 'A-Z' 'a-z')
+
+# 9.1 pregled (org accounti + allowlist/DAC7 status + moji eventi uklj. draftove):
+curl -s -X POST $FN/events-organizer -H "Authorization: Bearer $ADMIN_JWT" \
+  -H 'content-type: application/json' -d '{"action":"overview"}' | jq
+# → {"accounts":[{"id":…,"allowlisted":false,"has_record":false,…}],"events":[…]}
+
+# 9.2 kreiranje eventa BEZ Safe adrese (draft; placeholder nulta adresa):
+curl -s -X POST $FN/events-organizer -H "Authorization: Bearer $ADMIN_JWT" \
+  -H 'content-type: application/json' -d '{
+  "action":"create", "event_id":"'$EV'", "account_id":"'$ORG'",
+  "title":"BlockSplit 2027", "venue_name":"MEDILS", "venue_city":"Split",
+  "event_type":"kamp", "description_hr":"Unconference summer camp.",
+  "tiers":[{"title":"Stay paket","price_cents":39900,"inventory_total":40,"imenska":true}]
+}' | jq
+# → {"id":…, "slug":"blocksplit-2027", "existing":false, "event_created":true}
+# kampanja je draft + private — javni feed je NE prikazuje
+
+# 9.3 publish gating — allowlist odbijanje (kriterij 3; server-side test):
+curl -s -X POST $FN/events-organizer -H "Authorization: Bearer $ADMIN_JWT" \
+  -H 'content-type: application/json' \
+  -d '{"action":"publish","campaign_id":"'$EV'"}' | jq
+# → {"error":"organizer_not_allowlisted"} (HTTP 400) — org NIJE na allowlistu
+
+# operater dodaje org na allowlist (ručni flag za pilot; SAMO service/psql):
+# lpsql: insert into pinka_finance.organizer_allowlist (account_id, note)
+#        values ('<ORG>', 'pilot: Luka Sucic');
+
+# 9.4 publish gating — bez pravog Safe-a i dalje nema objave:
+curl -s … -d '{"action":"publish","campaign_id":"'$EV'"}' | jq
+# → {"error":"campaign_destination_missing"} — nulta/nevaljana adresa
+
+# 9.5 organizator upiše svoj Safe (kreiran kroz app onboarding) + publish:
+curl -s -X POST $FN/events-organizer -H "Authorization: Bearer $ADMIN_JWT" \
+  -H 'content-type: application/json' -d '{
+  "action":"update", "campaign_id":"'$EV'",
+  "destination_address":"0x1111111111111111111111111111111111111111"
+}' | jq
+curl -s … -d '{"action":"publish","campaign_id":"'$EV'"}' | jq
+# → {"campaign_id":…, "state":"active", "visibility":"public"}
+# event se ODMAH pojavi u javnom feedu (korak 2) bez izmjene koda/configa
+
+# 9.6 tier lock nakon objave (kupci su kupovali pod tim uvjetima):
+#   update s promijenjenim price_cents postojećeg tiera → {"error":"tier_locked"}
+#   inventory_total < inventory_claimed → {"error":"inventory_below_claimed"}
+#   novi tier (bez "id") se SMIJE dodati (npr. Early Bird → Regular faza)
+
+# 9.7 zatvaranje prodaje: {"action":"publish","campaign_id":…,"target_state":"closed"}
+#   closed → closed/active → {"error":"invalid_state_transition"}
+
+# 9.8 DAC7 zapis organizatora (SENSITIVE; nikad u feedu):
+curl -s -X POST $FN/events-organizer -H "Authorization: Bearer $ADMIN_JWT" \
+  -H 'content-type: application/json' -d '{
+  "action":"record_upsert", "account_id":"'$ORG'",
+  "legal_name":"UBIK udruga", "oib":"12345678901",
+  "address_line":"Ulica 1", "city":"Split", "postal_code":"21000",
+  "financial_identifier_type":"safe_address",
+  "financial_identifier":"0x1111111111111111111111111111111111111111"
+}' | jq
+# → {"account_id":…, "saved":true}
+# RLS test (kriterij 4): drugi authenticated user vidi 0 redaka; anon nema ni
+# select grant (permission denied); ne-admin record_upsert → 403 not_authorized
+
+# 9.9 ne-admin JWT na publish/update → {"error":"not_authorized"} (HTTP 403)
+```
+
+Simulacija kroz psql (bez GoTrue; sve gore + guardovi):
+
+```sql
+-- lpsql
+select set_config('request.jwt.claims',
+  '{"sub":"<ADMIN_USER_UUID>","role":"authenticated"}', false);
+set role authenticated;
+select pinka_finance.publish_event('<EV>');          -- organizer_not_allowlisted / campaign_destination_missing / OK
+select pinka_finance.update_event(p_campaign_id => '<EV>', p_title => 'Novi naslov');
+select pinka_finance.organizer_overview();
+select pinka_finance.upsert_organizer_record(…);
+reset role;
+
+-- destination lock (anti-rug): nakon prve PLAĆENE uplate update_event s novom
+-- adresom → exception campaign_destination_locked (campaigns_write_guard)
+```
+
+## 10. Feed filtriranje/paginacija (E4)
+
+```bash
+curl -s "$FN/events-feed?grad=split" | jq '.events[].slug'      # case-insensitive substring
+curl -s "$FN/events-feed?from=2027-01-01&to=2027-12-31" | jq    # events.starts_at prozor
+curl -s "$FN/events-feed?limit=1&offset=1" | jq '.limit, .offset, (.events|length)'
+# default limit 50, max 100; bez parametara = ponašanje kao E2 (prvih 50)
+```
+
 ## Deploy (prod — ručni korak)
 
 ```bash
-./scripts/db-migrate.sh --dry-run     # pending events_ticketing + events_checkin migracije
+./scripts/db-migrate.sh --dry-run     # pending events_ticketing + events_checkin + events_organizer
 ./scripts/db-migrate.sh               # idempotentne; drugi run = no-op
 ./scripts/deploy-functions.sh --only=events-order
 ./scripts/deploy-functions.sh --only=events-confirm
 ./scripts/deploy-functions.sh --only=events-tickets
 ./scripts/deploy-functions.sh --only=events-checkin
+./scripts/deploy-functions.sh --only=events-organizer
 ./scripts/deploy-functions.sh --only=events-feed --restart -y
+
+# E4 post-deploy (pilot): allowlist org accounta organizatora (psql, v. §9.3)
 ```
