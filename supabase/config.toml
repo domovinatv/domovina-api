@@ -102,3 +102,6 @@ verify_jwt = false   # autorizacija = posjedovanje order UUID-ova (bearer capabi
 
 [functions.events-feed]
 verify_jwt = false   # javni discovery feed (public kampanje type=tickets + tieri; bez PII)
+
+[functions.events-checkin]
+verify_jwt = false   # interno getUser; autorizacija = has_role_on_account admin u redeem_ticket RPC-u

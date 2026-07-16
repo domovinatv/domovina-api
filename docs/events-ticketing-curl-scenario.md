@@ -1,12 +1,14 @@
-# Događaji (E2) — curl test scenarij
+# Događaji (E2+E3) — curl test scenarij
 
 > Reference: safe-wallet-monorepo `docs/whitelabel-wallet/11-dogadjaji-p2p-ticketing.md` +
-> `handoffs/dogadjaji-2-backend.md`. Migracije: `20260716120000/120100/120200_events_ticketing_*`.
-> Funkcije: `events-order`, `events-confirm`, `events-tickets`, `events-feed`.
+> `handoffs/dogadjaji-2-backend.md` + `handoffs/dogadjaji-3-qr-checkin.md`.
+> Migracije: `20260716120000/120100/120200_events_ticketing_*`, `20260717120000_events_checkin`.
+> Funkcije: `events-order`, `events-confirm`, `events-tickets`, `events-feed`, `events-checkin`.
 >
 > Scenarij pokriva kriterije prihvaćanja E2: create_event → order (rezervacija) →
 > onchain confirm → paid + N ulaznica; idempotencija; oversell odbijen; TTL istek
-> oslobađa rezervaciju; imenska bez imena odbijena.
+> oslobađa rezervaciju; imenska bez imena odbijena. E3 (§8): check-in — prvi sken
+> ✅, drugi sken istog QR-a ⛔ s vremenom prvog ulaska; ne-admin odbijen.
 
 ## 0. Okruženje
 
@@ -190,7 +192,68 @@ curl -s -X POST $FN/events-tickets -H 'content-type: application/json' -d '{"ord
 # → "expired"; inventory_claimed se smanjio za quantity (provjeri u psql)
 ```
 
-## 7. Nesparena uplata (§8 reconciliation rub)
+## 7. Check-in (E3) — skener ulaza
+
+`events-checkin` traži GoTrue JWT org **admina** organizatorovog accounta
+(Authorization header); autorizacija je isključivo server-side u `redeem_ticket`
+RPC-u (`has_role_on_account(campaign.account_id, 'admin')`). App šalje goli
+64-hex token; funkcija tolerira i cijeli QR payload s `dgdj1:` prefiksom.
+
+```bash
+# JWT org admina (lokalni stack; korisnik mora biti admin member org accounta
+# koji je vlasnik kampanje — v. public.accounts_memberships):
+export ADMIN_JWT=$(curl -s -X POST "$API/auth/v1/token?grant_type=password" \
+  -H "apikey: $ANON_KEY" -H 'content-type: application/json' \
+  -d '{"email":"admin@momo.test","password":"…"}' | jq -r .access_token)
+
+export QR_TOKEN=<64-hex token iz koraka 5>
+
+# prvi sken → ✅ checked_in s imenom holdera, tierom i brojačem ulazaka:
+curl -s -X POST $FN/events-checkin -H "Authorization: Bearer $ADMIN_JWT" \
+  -H 'content-type: application/json' -d '{"qr_token":"'$QR_TOKEN'"}' | jq
+# → {"status":"checked_in","serial":"MON-000001","holder_name":"Ana Anić",
+#    "tier_title":"Super Early Bird","event_title":…,"checked_in_at":…,
+#    "checked_in_count":1}
+
+# drugi sken ISTOG tokena → ⛔ already_checked_in s vremenom i skenerom PRVOG
+# ulaska (anti-double-entry; idempotentno — ništa se ne mijenja u bazi):
+curl -s -X POST $FN/events-checkin -H "Authorization: Bearer $ADMIN_JWT" \
+  -H 'content-type: application/json' -d '{"qr_token":"'$QR_TOKEN'"}' | jq
+# → {"status":"already_checked_in","checked_in_at":<prvi ulaz>,
+#    "checked_in_by_email":"admin@momo.test","checked_in_count":1,…}
+
+# bez JWT-a → 401 not_authenticated; s JWT-om korisnika koji NIJE org admin
+# → 403 not_authorized (RLS/grant test); nepostojeći token → {"status":"not_found"}
+curl -s -X POST $FN/events-checkin -H 'content-type: application/json' \
+  -d '{"qr_token":"'$QR_TOKEN'"}' | jq          # → 401
+```
+
+Simulacija kroz psql (bez GoTrue; testira RPC autorizaciju + idempotenciju):
+
+```sql
+-- lpsql
+select set_config('request.jwt.claims',
+  '{"sub":"<ADMIN_USER_UUID>","role":"authenticated"}', false);
+set role authenticated;
+select pinka_finance.redeem_ticket('<QR_TOKEN>');   -- {"status":"checked_in",…,"checked_in_count":1}
+select pinka_finance.redeem_ticket('<QR_TOKEN>');   -- {"status":"already_checked_in",…} — drugi sken
+-- ne-admin sub → ERROR not_authorized; bez claims → ERROR not_authenticated
+-- krivi format → ERROR invalid_token; nepoznat token → {"status":"not_found"}
+
+-- void (organizatorsko poništenje; samo issued → void):
+select pinka_finance.void_ticket('<TICKET_UUID>');  -- {"status":"voided"}
+-- redeem poništene → {"status":"void"}; ponovni void → {"status":"already_void"}
+-- void iskorištene → {"status":"already_checked_in"} (ulaz se već dogodio)
+reset role;
+
+-- audit trag (uklj. pokušaje dvostrukog ulaska — INSERT preživi jer se poslovni
+-- ishodi vraćaju kao status, ne exception):
+select event_type, payload from pinka_finance.contribution_events
+ where event_type in ('ticket.checked_in','ticket.checkin_duplicate','ticket.voided')
+ order by created_at desc;
+```
+
+## 8. Nesparena uplata (§8 reconciliation rub)
 
 Ako je cron indexer (`pinka-onchain-ingest`) već kreditirao isti `(tx_hash,
 log_index)` kao generičku donaciju, `events-confirm` vraća
@@ -206,10 +269,11 @@ select * from pinka_finance.contribution_events
 ## Deploy (prod — ručni korak)
 
 ```bash
-./scripts/db-migrate.sh --dry-run     # 3 pending events_ticketing migracije
+./scripts/db-migrate.sh --dry-run     # pending events_ticketing + events_checkin migracije
 ./scripts/db-migrate.sh               # idempotentne; drugi run = no-op
 ./scripts/deploy-functions.sh --only=events-order
 ./scripts/deploy-functions.sh --only=events-confirm
 ./scripts/deploy-functions.sh --only=events-tickets
+./scripts/deploy-functions.sh --only=events-checkin
 ./scripts/deploy-functions.sh --only=events-feed --restart -y
 ```
