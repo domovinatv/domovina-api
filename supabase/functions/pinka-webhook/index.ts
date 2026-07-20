@@ -143,9 +143,10 @@ async function verify(secret: string, signedPayload: string, sigHeader: string):
 }
 
 function decodeSecret(secret: string): Uint8Array | null {
-  const stripped = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret;
+  const stripped = secret.startsWith("v1,") ? secret.slice(3) : secret;
+  const base = stripped.startsWith("whsec_") ? stripped.slice("whsec_".length) : stripped;
   try {
-    const bin = atob(stripped);
+    const bin = atob(base);
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
