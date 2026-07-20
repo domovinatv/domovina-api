@@ -1,7 +1,13 @@
 # Pinka payout execution (ops / pay.domovina.ai)
 
-Status: **SPEC** (request strana implementirana u domovina-api + domovina.ai;
-on-chain izvršitelj NIJE implementiran — ovo je ugovor za pay.domovina.ai/ops).
+> **SUPERSEDED (2026-07-20):** platform-custody model iz ovog dokumenta je
+> napušten — odredište kampanje je uvijek vlasnikova adresa i platformska
+> "isplata" ne postoji. Vidi [`pinka-destination-model.md`](./pinka-destination-model.md).
+> Dokument ostaje kao povijesni zapis; izvršitelj i `mark_payout_*` RPC-evi se
+> NE grade.
+
+Status: ~~SPEC~~ (request strana implementirana u domovina-api + domovina.ai;
+on-chain izvršitelj NIJE implementiran i po odluci gore se ne implementira).
 
 ## Model
 
