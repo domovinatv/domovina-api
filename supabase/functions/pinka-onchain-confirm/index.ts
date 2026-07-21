@@ -23,7 +23,7 @@ const WEI_PER_CENT = 10n ** 16n;
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  let body: { campaign_id?: string; tx_hash?: string };
+  let body: { campaign_id?: string; tx_hash?: string; contribution_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -31,6 +31,11 @@ Deno.serve(async (req) => {
   }
   const campaignId = body.campaign_id;
   const txHash = (body.tx_hash ?? "").toLowerCase();
+  // Ako je klijent rezervirao mjesta, doprinos VEC postoji (pending, s
+  // holdovima). Bez ovoga bi record_onchain_contribution napravio DRUGI
+  // doprinos bez mjesta, hold bi istekao, a korisnik bi platio i ne bi dobio
+  // nista. Vidi confirm_slot_contribution u 20260722120000_pinka_slots.sql.
+  const contributionId = body.contribution_id ?? null;
   if (!campaignId) return json({ error: "campaign_id_required" }, 400);
   if (!/^0x[0-9a-f]{64}$/.test(txHash)) return json({ error: "invalid_tx_hash" }, 400);
 
@@ -66,9 +71,16 @@ Deno.serve(async (req) => {
     const cents = Number(BigInt(lg.data) / WEI_PER_CENT);
     if (!Number.isFinite(cents) || cents <= 0) continue;
     const logIndex = parseInt(lg.logIndex, 16);
-    const { data, error } = await sb
-      .schema("pinka_finance")
-      .rpc("record_onchain_contribution", {
+    const { data, error } = contributionId
+      ? await sb.schema("pinka_finance").rpc("confirm_slot_contribution", {
+        p_campaign_id: campaignId,
+        p_contribution_id: contributionId,
+        p_tx_hash: txHash,
+        p_log_index: logIndex,
+        p_from: from,
+        p_amount_cents: cents,
+      })
+      : await sb.schema("pinka_finance").rpc("record_onchain_contribution", {
         p_campaign_id: campaignId,
         p_tx_hash: txHash,
         p_log_index: logIndex,
@@ -80,7 +92,9 @@ Deno.serve(async (req) => {
       continue;
     }
     const row = Array.isArray(data) ? data[0] : data;
-    results.push({ log: logIndex, status: row?.created ? "created" : "exists", contribution_id: row?.contribution_id, cents });
+    // confirm_slot_contribution vraca `credited`, record_onchain vraca `created`
+    const didWrite = row?.created ?? row?.credited ?? false;
+    results.push({ log: logIndex, status: didWrite ? "created" : "exists", contribution_id: row?.contribution_id, cents });
   }
 
   const credited = results.filter((r) => r.status === "created" || r.status === "exists").length;
