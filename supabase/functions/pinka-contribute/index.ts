@@ -34,6 +34,19 @@ const INTENT_TTL_SECONDS = 86_400;
 // klijent na 409 osvjezava mapu i ponovno bira, na 400 samo prikaze gresku.
 const SLOT_CONFLICT = ["slot_taken", "too_many_holds", "amount_below_slot_price"];
 
+// Rail moze vratiti expires_at kao ISO string (HTTP API) ili UNIX broj
+// (sekunde). Normaliziramo na ISO string; null kad je odsutan/neispravan.
+function parseExpiresAt(raw: unknown): string | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return new Date(raw * 1000).toISOString();
+  }
+  if (typeof raw === "string" && raw.length > 0) {
+    const ms = Date.parse(raw);
+    return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -128,10 +141,12 @@ Deno.serve(async (req) => {
   // 4) zalijepi sid na doprinos + produzi hold na stvarni vijek intenta.
   //    Hold i intent time umiru istovremeno PO KONSTRUKCIJI — nema prozora u
   //    kojem je intent ziv a mjesto vec oslobodeno.
-  //    Rail vraca expires_at kao UNIX sekunde (backend/src/intents/db.ts:12).
-  const holdExpiresAt = typeof intent.expires_at === "number"
-    ? new Date(intent.expires_at * 1000).toISOString()
-    : null;
+  //    Rail HTTP API serijalizira expires_at kao ISO string
+  //    ("2026-07-23T05:32:51.000Z"), NE kao UNIX broj (db.ts drzi broj interno,
+  //    ali JSON odgovor je string) — pa prihvacamo oba oblika. Bez ovoga check
+  //    padne na null i hold ostane na provizornih 10 min umjesto vijeka intenta
+  //    (24 h): slot se oslobodi dok SEPA nalog jos putuje.
+  const holdExpiresAt = parseExpiresAt(intent.expires_at);
   const { error: attachErr } = await admin
     .schema("pinka_finance")
     .rpc("attach_intent", {
