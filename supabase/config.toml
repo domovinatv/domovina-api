@@ -114,3 +114,9 @@ verify_jwt = false   # interno getUser; autorizacija = has_role_on_account admin
 
 [functions.events-organizer]
 verify_jwt = false   # interno getUser; autorizacija = org admin u RPC-ima (create/update INVOKER + RLS, publish DEFINER + allowlist)
+
+[functions.events-stripe-intent]
+verify_jwt = false   # server-to-server iz domovina-ulaznice Workera; autentikacija je HMAC (EVENTS_STRIPE_CONFIRM_SECRET) — vraća acct_… pa ne smije biti otvorena
+
+[functions.events-stripe-confirm]
+verify_jwt = false   # server-to-server iz Workera nakon verifikacije Stripe webhook potpisa; autentikacija je HMAC (EVENTS_STRIPE_CONFIRM_SECRET), ne JWT — otvorena funkcija = besplatne ulaznice

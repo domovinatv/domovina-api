@@ -1,12 +1,12 @@
-# Događaji (E2+E3+E4) — curl test scenarij
+# Događaji (E2+E3+E4+U1) — curl test scenarij
 
 > Reference: safe-wallet-monorepo `docs/whitelabel-wallet/11-dogadjaji-p2p-ticketing.md` +
 > `handoffs/dogadjaji-2-backend.md` + `handoffs/dogadjaji-3-qr-checkin.md` +
 > `handoffs/dogadjaji-4-organizator.md`.
 > Migracije: `20260716120000/120100/120200_events_ticketing_*`, `20260717120000_events_checkin`,
-> `20260717130000_events_organizer`.
+> `20260717130000_events_organizer`, `20260803120000_events_stripe_rail` (U1).
 > Funkcije: `events-order`, `events-confirm`, `events-tickets`, `events-feed`,
-> `events-checkin`, `events-organizer`.
+> `events-checkin`, `events-organizer`, `events-stripe-intent`, `events-stripe-confirm`.
 >
 > Scenarij pokriva kriterije prihvaćanja E2: create_event → order (rezervacija) →
 > onchain confirm → paid + N ulaznica; idempotencija; oversell odbijen; TTL istek
@@ -14,6 +14,8 @@
 > ✅, drugi sken istog QR-a ⛔ s vremenom prvog ulaska; ne-admin odbijen. E4 (§9):
 > organizator self-service — draft bez Safe-a, publish gating (allowlist + Safe,
 > server-side), update/tier lock, DAC7 zapis (RLS), feed filtriranje/paginacija.
+> U1 (§11): Stripe rail — HMAC gate, direct-charge intent, confirm + izdavanje,
+> idempotencija u bazi, poslovni ne-uspjesi kao status, onchain put nepromijenjen.
 
 ## 0. Okruženje
 
@@ -374,6 +376,198 @@ curl -s "$FN/events-feed?limit=1&offset=1" | jq '.limit, .offset, (.events|lengt
 # default limit 50, max 100; bez parametara = ponašanje kao E2 (prvih 50)
 ```
 
+## 11. Stripe rail (U1) — offchain naplata narudžbe
+
+> Migracija: `20260803120000_events_stripe_rail.sql`.
+> Funkcije: `events-stripe-intent`, `events-stripe-confirm` (obje `verify_jwt=false` + **HMAC**).
+> Plan: `domovina-ulaznice/docs/handoffs/u1-stripe-rail-backend.md`.
+
+Isti tok kao onchain (§3–§5), ali uplatu potvrđuje Stripe umjesto blockchaina.
+**Backend nikad ne razgovara sa Stripeom** — Stripe zove isključivo Cloudflare
+Worker (`domovina-ulaznice`), koji verificira webhook potpis i tek onda poziva
+`events-stripe-confirm`. Naplata je Connect **direct charge** na račun
+organizatora, 0 % provizije: novac ne prolazi kroz platformu.
+
+### 11.0 Autentikacija: HMAC (jedina razlika prema onchain putu)
+
+Kod `events-confirm` autorizacija je sam blockchain. Ovdje takvog dokaza nema —
+jedini dokaz uplate je Stripe potpis koji je verificirao Worker. Zato obje
+funkcije traže dijeljenu tajnu:
+
+```
+header:  x-ulaznice-signature: sha256=<hex(hmac_sha256(EVENTS_STRIPE_CONFIRM_SECRET, RAW_BODY))>
+potpis:  nad SIROVIM tijelom zahtjeva (byte-for-byte), usporedba konstantnog vremena
+bez tajne na serveru → 503 (nikad "prolazi jer tajne nema")
+krivi/nedostajući potpis → 401, baza se NE dira
+```
+
+Replay se namjerno ne brani timestampom: ponovljeni identičan zahtjev je no-op
+jer je idempotencija u bazi (unique `(payment_rail, external_payment_ref)`).
+
+```bash
+export SECRET=<EVENTS_STRIPE_CONFIRM_SECRET>
+sign() { printf '%s' "$1" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.*= /sha256=/'; }
+post() { curl -s -X POST "$1" -H 'content-type: application/json' \
+              -H "x-ulaznice-signature: $(sign "$2")" -d "$2" | jq; }
+```
+
+### 11.1 Priprema: Stripe stanje organizatora
+
+`organizer_payment_rails` piše **isključivo service_role** (Worker iz
+`account.updated` webhooka). Za smoke test kroz psql:
+
+```sql
+-- lpsql
+insert into pinka_finance.organizer_payment_rails
+  (account_id, stripe_account_id, stripe_charges_enabled, stripe_payouts_enabled, invoice_provider)
+values ('<ORG_ACCOUNT_ID>', 'acct_1TestOrganizator', true, true, 'fira')
+on conflict (account_id) do update
+  set stripe_account_id = excluded.stripe_account_id,
+      stripe_charges_enabled = excluded.stripe_charges_enabled;
+
+-- RLS: anon → permission denied; authenticated ne-član → 0 redaka;
+--      org admin → vidi svoj redak, ali UPDATE → permission denied
+```
+
+### 11.2 Narudžba (nepromijenjeni `events-order` iz §3)
+
+```bash
+export ORDER=$(uuidgen | tr 'A-Z' 'a-z')
+curl -s -X POST $FN/events-order -H 'content-type: application/json' -d '{
+  "order_id": "'$ORDER'", "campaign_id": "'$EV'", "tier_id": "'$TIER'", "quantity": 2,
+  "holders": [{"full_name":"Web Kupac","email":"web@example.com"},{"full_name":"Drugi Gost"}]
+}' | jq
+# → pending, amount_cents 29800; inventory_claimed +2 ODMAH (rezervacija, TTL 20 min)
+```
+
+### 11.3 `events-stripe-intent` — podaci za Checkout
+
+```bash
+post $FN/events-stripe-intent "{\"order_id\":\"$ORDER\"}"
+# → {"order_id":…, "amount_cents":29800, "currency":"eur", "quantity":2,
+#    "expires_at":…, "buyer_email":null,
+#    "tier":{"id":…,"title":"Redovna","price_cents":14900,"imenska":true},
+#    "event":{"campaign_id":…,"title":…,"slug":…,"starts_at":…,"ends_at":…,
+#             "timezone":"Europe/Zagreb","venue_name":…,"venue_city":…},
+#    "stripe_account_id":"acct_1TestOrganizator",   ← JEDINI odgovor koji ga vraća
+#    "charges_enabled":true, "invoice_provider":"fira"}
+
+# krivi HMAC → {"error":"bad_signature"} (HTTP 401)
+# narudžba već plaćena → {"error":"order_not_pending","state":"paid"} (400)
+# istekla rezervacija  → {"error":"order_expired"} (400)
+# organizator bez charges_enabled → {"error":"organizer_charges_disabled"} (400)
+# organizator bez acct_…          → {"error":"organizer_not_connected"} (400)
+```
+
+Invariant (`rodjendaonice/worker/bookable.ts`): bez povezanog računa i bez
+`charges_enabled` Checkout session se **nikad** ne kreira. `acct_…` ne izlazi
+nigdje drugdje — javni feed dobiva izvedeni boolean.
+
+### 11.4 `events-stripe-confirm` — kreditiranje + izdavanje ulaznica
+
+```bash
+CB="{\"order_id\":\"$ORDER\",\"external_ref\":\"pi_HTTP_1\",\"amount_cents\":29800,\"payer_email\":\"web@example.com\"}"
+
+# 5. KRIVI HMAC PRVO — baza mora ostati netaknuta:
+curl -s -X POST $FN/events-stripe-confirm -H 'content-type: application/json' \
+  -H "x-ulaznice-signature: sha256=$(printf 'a%.0s' {1..64})" -d "$CB" | jq
+# → {"error":"bad_signature"} (401)
+# bez headera → {"error":"missing_signature"} (401)
+# lpsql: select state, payment_rail, external_payment_ref from pinka_finance.contributions where id='<ORDER>';
+#        → pending | onchain | null   ← ništa se nije dogodilo, 0 ulaznica
+
+# 3. valjan HMAC → paid + N ulaznica + JEDNOKRATNI QR tokeni:
+post $FN/events-stripe-confirm "$CB"
+# → {"ok":true,"status":"paid","serials":["SUS-000004","SUS-000005"],"order_id":…,
+#    "tickets":[{"serial":"SUS-000004","holder_name":"Web Kupac",
+#                "holder_email":"web@example.com","state":"issued",
+#                "qr_token":"<64-hex>"}, …]}
+
+# 4. isti confirm ponovno → already_paid, BEZ novih ulaznica:
+post $FN/events-stripe-confirm "$CB"
+# → {"ok":true,"status":"already_paid","serials":[…isti…],
+#    "tickets":[{…,"qr_token":null}, …]}   ← tokeni su već isporučeni
+# lpsql: select count(*), count(qr_token_once) from pinka_finance.tickets
+#        where contribution_id = '<ORDER>';   → 2 | 0
+```
+
+⚠️ **QR tokeni su jednokratni.** `events-stripe-confirm` ih povlači kroz
+postojeći `deliver_ticket_orders` (isti invariant kao `events-tickets`): u bazi
+trajno ostaje samo sha256 hash. Namjerno se poziva i na `already_paid` — ako je
+prvi confirm prošao, a odgovor nije stigao do Workera, retry webhooka i dalje
+isporuči tokene (crash recovery). Nakon prve **uspješne** dostave `qr_token` je
+zauvijek `null`.
+
+### 11.5 Poslovni ne-uspjesi: HTTP 200 + `status` (nikad exception)
+
+Exception bi rollbackao audit zapis u `contribution_events` — v.
+`13-lekcije-sesije-dogadjaji.md` §3. Worker na svaki od ovih statusa reagira
+(refund / alarm / red za ručno sparivanje):
+
+```bash
+# 6. premali iznos:
+post $FN/events-stripe-confirm "{\"order_id\":\"$ORDER2\",\"external_ref\":\"pi_HTTP_2\",\"amount_cents\":100}"
+# → {"ok":true,"status":"amount_insufficient","expected_cents":14900,"received_cents":100}
+#   audit: ticket_order.underpaid
+
+# 7. isti external_ref na DRUGOJ narudžbi:
+post $FN/events-stripe-confirm "{\"order_id\":\"$ORDER2\",\"external_ref\":\"pi_HTTP_1\",\"amount_cents\":14900}"
+# → {"ok":true,"status":"tx_already_credited"}
+#   audit: ticket_order.match_conflict (other_contribution_id) → ručno sparivanje
+
+# 8. istekla rezervacija + tier u međuvremenu rasprodan:
+# → {"ok":true,"status":"expired_sold_out"}
+#   audit: ticket_order.expired_sold_out → Worker radi PUN REFUND (doc 03 §5)
+
+# 8b. druga uplata na VEĆ plaćenu narudžbu (dvije checkout sesije, kupac naplaćen dvaput):
+# → {"ok":true,"status":"duplicate_payment","credited_ref":"pi_HTTP_1"}
+#   audit: ticket_order.duplicate_payment → Worker refunda drugu uplatu
+#   ⚠️ odstupanje od onchain blizanca: confirm_ticket_order tu raisa
+#      order_already_paid; kod Stripea je to stvarni novac pa mora ostati trag.
+```
+
+Simulacija bez HTTP-a (samo RPC — testira state machine i idempotenciju):
+
+```sql
+-- lpsql
+select pinka_finance.confirm_ticket_order_offchain(
+  '<ORDER>'::uuid, 'stripe', 'pi_TEST_1', 29800, 'kupac@example.com');
+-- → {"status":"paid","serials":["SUS-000001","SUS-000002"]}
+-- drugi poziv istog: {"status":"already_paid"}
+
+-- idempotencija je u BAZI, ne u kodu — direktan pokušaj dupliranja pukne:
+update pinka_finance.contributions
+   set payment_rail = 'stripe', external_payment_ref = 'pi_TEST_1'
+ where id = '<DRUGA_NARUDZBA>';
+-- → ERROR: duplicate key value violates unique constraint "ux_contributions_external_payment"
+
+-- validacija ulaza (programske greške = exception, kao i drugdje):
+select pinka_finance.confirm_ticket_order_offchain('<ORDER>'::uuid,'onchain','pi_X_1',1,null);
+-- → ERROR: invalid_rail          (rail mora biti 'stripe')
+select pinka_finance.confirm_ticket_order_offchain('<ORDER>'::uuid,'stripe','x',1,null);
+-- → ERROR: invalid_external_ref
+
+-- grantovi: authenticated/anon NE smiju izvršiti RPC
+set role authenticated;
+select pinka_finance.confirm_ticket_order_offchain('<ORDER>'::uuid,'stripe','pi_Y_1',1,null);
+-- → ERROR: permission denied for function confirm_ticket_order_offchain
+reset role;
+```
+
+### 11.6 Onchain put ostaje nepromijenjen
+
+```sql
+-- lpsql — §4 scenarij i dalje prolazi identično:
+select pinka_finance.confirm_ticket_order(
+  '<ONCHAIN_ORDER>'::uuid, '0x' || repeat('ab', 32), 0,
+  '0x2222222222222222222222222222222222222222', 14900);
+-- → {"status":"paid","serials":[…]} ; drugi poziv → {"status":"already_paid"}
+
+select id, state, payment_rail, external_payment_ref, forward_tx_hash is not null
+  from pinka_finance.contributions where id = '<ONCHAIN_ORDER>';
+-- → paid | onchain | null | t   ← default 'onchain' čuva postojeće ponašanje
+```
+
 ## Deploy (prod — ručni korak)
 
 ```bash
@@ -387,4 +581,22 @@ curl -s "$FN/events-feed?limit=1&offset=1" | jq '.limit, .offset, (.events|lengt
 ./scripts/deploy-functions.sh --only=events-feed --restart -y
 
 # E4 post-deploy (pilot): allowlist org accounta organizatora (psql, v. §9.3)
+```
+
+### Deploy Stripe raila (U1)
+
+```bash
+# 1. TAJNA PRIJE FUNKCIJA — bez nje funkcije vraćaju 503:
+openssl rand -hex 32                          # → EVENTS_STRIPE_CONFIRM_SECRET
+#    upisati u Coolify env edge-runtime servisa (ista vrijednost ide u
+#    `wrangler secret put EVENTS_STRIPE_CONFIRM_SECRET` u domovina-ulaznice)
+
+./scripts/db-migrate.sh --dry-run             # → 20260803120000_events_stripe_rail.sql
+./scripts/db-migrate.sh
+./scripts/deploy-functions.sh --only=events-stripe-intent
+./scripts/deploy-functions.sh --only=events-stripe-confirm --restart -y
+
+# 2. smoke na produkciji: intent bez potpisa MORA vratiti 401 (ne 200, ne 503)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://api.domovina.ai/functions/v1/events-stripe-confirm -d '{}'   # → 401
 ```
