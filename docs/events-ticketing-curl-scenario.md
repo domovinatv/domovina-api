@@ -4,7 +4,8 @@
 > `handoffs/dogadjaji-2-backend.md` + `handoffs/dogadjaji-3-qr-checkin.md` +
 > `handoffs/dogadjaji-4-organizator.md`.
 > Migracije: `20260716120000/120100/120200_events_ticketing_*`, `20260717120000_events_checkin`,
-> `20260717130000_events_organizer`, `20260803120000_events_stripe_rail` (U1).
+> `20260717130000_events_organizer`, `20260803120000_events_stripe_rail` (U1),
+> `20260803130000_events_stripe_refund` (U1/U2).
 > Funkcije: `events-order`, `events-confirm`, `events-tickets`, `events-feed`,
 > `events-checkin`, `events-organizer`, `events-stripe-intent`, `events-stripe-confirm`.
 >
@@ -568,6 +569,41 @@ select id, state, payment_rail, external_payment_ref, forward_tx_hash is not nul
 -- → paid | onchain | null | t   ← default 'onchain' čuva postojeće ponašanje
 ```
 
+### 11.7 Povrat plaćene narudžbe (`refund_ticket_order`)
+
+> Migracija: `20260803130000_events_stripe_refund.sql`. Zove ga **samo Worker**
+> (service_role) preko PostgREST-a, nakon što je Stripe povrat izveden.
+
+`void_ticket` se za ovo NE može koristiti: traži `auth.uid()` + org admin rolu,
+a Worker se autentificira service ključem i nema `auth.uid()`. Povrat je uz to
+operacija nad cijelom narudžbom (contribution + sve ulaznice + inventory +
+audit), pa mora biti jedna transakcija.
+
+```sql
+-- lpsql
+select pinka_finance.refund_ticket_order(
+  '<ORDER>'::uuid, 29800, 'expired_sold_out', 'pi_TEST_1');
+-- → {"status":"refunded","voided":2,"kept_checked_in":0}
+--   narudžba → refunded, izdane ulaznice → void, inventory se VRAĆA u prodaju,
+--   campaign_stats se osvježi, audit ticket_order.refunded ostaje
+
+select pinka_finance.refund_ticket_order('<ORDER>'::uuid);
+-- → {"status":"already_refunded", …}   ← idempotentno
+
+-- rubovi: nepostojeća → not_found; pending narudžba → not_paid + audit
+--   ticket_order.refund_unexpected; ulaznica na kojoj je netko VEĆ UŠAO ostaje
+--   checked_in (ulaz se dogodio) i njezino mjesto se NE vraća u prodaju
+```
+
+```bash
+# Worker put (PostgREST rpc, service ključ):
+curl -s -X POST "$API/rest/v1/rpc/refund_ticket_order" \
+  -H "apikey: $SERVICE_ROLE" -H "Authorization: Bearer $SERVICE_ROLE" \
+  -H 'Content-Profile: pinka_finance' -H 'content-type: application/json' \
+  -d '{"p_order_id":"<ORDER>","p_reason":"expired_sold_out","p_external_ref":"pi_…"}' | jq
+# anon/authenticated → permission denied (execute samo service_role)
+```
+
 ## Deploy (prod — ručni korak)
 
 ```bash
@@ -595,6 +631,8 @@ openssl rand -hex 32                          # → EVENTS_STRIPE_CONFIRM_SECRET
 ./scripts/db-migrate.sh
 ./scripts/deploy-functions.sh --only=events-stripe-intent
 ./scripts/deploy-functions.sh --only=events-stripe-confirm --restart -y
+#    (migracija 20260803130000 dodaje refund_ticket_order — nema nove funkcije,
+#     Worker ga zove kroz PostgREST rpc sa service ključem)
 
 # 2. smoke na produkciji: intent bez potpisa MORA vratiti 401 (ne 200, ne 503)
 curl -s -o /dev/null -w '%{http_code}\n' -X POST \
