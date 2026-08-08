@@ -121,7 +121,8 @@ parom (kolo, dan) da paginacija ne ponavlja ni ne preskače kandidate.
 
 ```bash
 auth my_voting_state
-# {"verified":true,"consented":false,"voted_today":false,…,"streak":0,"flags":0}
+# {"verified":true,"consented":false,"voted_today":false,…,"streak":0,"flags":0,
+#  "total_votes":0}
 
 auth cast_vote '{"p_slug":"podcast-inkubator","p_direction":1}'
 # → {"code":"P0001","message":"terms_not_accepted"}      (§4.3 privola pri prvom glasu)
@@ -129,7 +130,7 @@ auth cast_vote '{"p_slug":"podcast-inkubator","p_direction":1}'
 auth accept_voting_terms                                  # HTTP 204
 
 auth cast_vote '{"p_slug":"podcast-inkubator","p_direction":1}'
-# {"flags":1,"streak":1,"longest_streak":1,"voted_today":true,
+# {"flags":1,"streak":1,"longest_streak":1,"voted_today":true,"total_votes":1,
 #  "today_vote":{"slug":"podcast-inkubator","direction":1},
 #  "flags_burned":0,"streak_saved":false,"round":{"id":8,"ends_on":…,"days_left":13}}
 
@@ -147,6 +148,17 @@ auth cast_vote '{"p_slug":"ne-postoji","p_direction":1}'
 **Kriterij prihvaćanja iz T1 je time zadovoljen**: verificiran korisnik glasa →
 drugi glas isti dan pada na `already_voted_today` → tally se inkrementira točno
 jednom.
+
+`total_votes` je **vlastita** brojka glasača (`voters.total_votes`), ne agregat
+kola — `/account` je prikazuje uz niz i najduži niz (plan §8.6). Dodana je u
+`_voting_state_of` naknadno (T5), pa je nose i `my_voting_state()` i `cast_vote`.
+Vraćaju je **sve tri** grane projekcije (0 za neverificiranog i za verificiranog
+bez zapisa u `voters`) da polje klijentu ne izlazi i ulazi iz JSON-a:
+
+```bash
+auth my_voting_state | python3 -c 'import sys,json;print(json.load(sys.stdin)["total_votes"])'
+# 1   ← nakon prvog glasa gore
+```
 
 ### 3.1 Race / dupli tap — dvije istovremene transakcije
 

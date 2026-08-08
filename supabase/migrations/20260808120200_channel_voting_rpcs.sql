@@ -208,7 +208,8 @@ begin
       'verified', false, 'consented', false, 'voted_today', false,
       'today', p_day, 'streak', 0, 'longest_streak', 0, 'flags', 0,
       'streak_at_risk', false, 'flags_that_will_burn', 0,
-      'last_vote_day', null, 'today_vote', null, 'round', v_round
+      'last_vote_day', null, 'today_vote', null, 'round', v_round,
+      'total_votes', 0
     );
   end if;
 
@@ -219,7 +220,8 @@ begin
       'verified', true, 'consented', false, 'voted_today', false,
       'today', p_day, 'streak', 0, 'longest_streak', 0, 'flags', 0,
       'streak_at_risk', false, 'flags_that_will_burn', 0,
-      'last_vote_day', null, 'today_vote', null, 'round', v_round
+      'last_vote_day', null, 'today_vote', null, 'round', v_round,
+      'total_votes', 0
     );
   end if;
 
@@ -260,7 +262,12 @@ begin
     'flags_that_will_burn', v_burn,
     'last_vote_day',        v_v.last_vote_day,
     'today_vote',           v_today_vote,
-    'round',                v_round
+    'round',                v_round,
+    -- Ukupan broj glasova ovog glasača — /account ga prikazuje uz niz i najduži
+    -- niz (plan §8.6). Nije agregat kola nego vlastita brojka, pa ide ovdje, a
+    -- ne u current_round(). Sve tri grane ga vraćaju (0 kad glasača još nema)
+    -- da klijentu polje ne izlazi i ulazi iz JSON-a.
+    'total_votes',          v_v.total_votes
   );
 end;
 $$;
