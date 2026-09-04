@@ -177,3 +177,47 @@ Provjeri da backup stvarno ima podatke, ne samo strukturu:
 ```bash
 grep -c "^COPY pinka_finance" backups/<file>.sql
 ```
+
+---
+
+## Provjera ponašanja, ne samo primjene (2026-09-03)
+
+`supabase db reset` dokazuje da migracija **prolazi**. Ne dokazuje da radi ono
+zbog čega je napisana. Za migracije `20260903120000` (rail gate) i
+`20260903120100` (rotacija QR tokena) uveden je obrazac koji vrijedi ponoviti:
+uz migraciju ide skripta u `supabase/tests/` koja tvrdnje provjerava nad pravom
+shemom i **pada glasno**.
+
+```bash
+supabase db reset --no-seed        # sve migracije od nule
+psql "$LOCAL" -f supabase/tests/20260903_rail_gate_i_rotacija.sql
+# očekivano: NOTICE redci "OK — …" i na kraju "SVE PROVJERE PROŠLE"
+```
+
+Četiri stvari koje su se pokazale nužnima da skripta bude korisna:
+
+1. **Skripta briše svoj trag na početku, ne na kraju.** Prvi run je prošao, drugi
+   pao: zadnji korak je ostavio `stripe_charges_enabled = true`, pa je test „bez
+   raila" krenuo s uključenim railom. Čišćenje na kraju ne pomaže ako skripta
+   pukne u sredini.
+2. **Negativni testovi moraju provjeravati KOJU grešku dobivaju.** `exception when
+   others` koji samo kaže „nešto je puklo" prolazi i kad je puklo iz krivog
+   razloga — u ovom slučaju je RLS odbio insert prije nego je trigger uopće
+   došao na red, pa test nije dokazivao ništa. Lijek: `if sqlerrm not like
+   '%očekivani_kod%' then raise exception 'PAO TEST: kriva greška: %', sqlerrm`.
+3. **Kad RLS stoji na putu, testiraj funkciju izravno.** Pravilo „donacije i
+   dalje traže Safe" nije bilo moguće dokazati kroz `insert into campaigns`
+   (RLS insert policy traži KYC). Provjera je zato nad `event_rail_ready(...)`
+   za sve četiri kombinacije tipa i raila — to je funkcija koja pravilo i
+   sadrži, trigger je samo zove.
+4. **Idempotentnost se provjerava ponovnim `psql -f` nad samom migracijom**, ne
+   samo drugim `db reset`-om: `create or replace` + `if not exists` moraju dati
+   nula grešaka na već migriranoj bazi.
+
+Zamka iz iste sesije: `pinka_finance.contributions.destination_address` je
+`not null`, a `campaign_type` enum nema `'standard'` (`donation`, `crowdfund`,
+`tokenization`, `tickets`, `realestate`). Oboje se otkriva tek pri pisanju
+testnih redaka, ne pri čitanju sheme.
+
+Vezano: [`docs/events-ticketing-curl-scenario.md`](events-ticketing-curl-scenario.md),
+`../domovina-ulaznice/docs/2026-09-03-implementacija-p0-p1.md`.
