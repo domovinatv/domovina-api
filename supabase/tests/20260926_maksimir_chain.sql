@@ -227,6 +227,12 @@ begin
   end if;
   if (domovina_ai.maksimir_public_ballots()->>'count')::int <> 1 then raise exception 'PAD — public_ballots s lanca'; end if;
   if (domovina_ai.maksimir_snapshot()->>'public_voters')::int <> 1 then raise exception 'PAD — public_voters'; end if;
+  -- promjena oblika imena bez listića faze 1 (listić je na lancu)
+  r := domovina_ai._maksimir_set_public_for(a, 'full');
+  if r->>'public_mode' <> 'full' or domovina_ai.maksimir_share(r->>'share_id')->'card'->>'name' <> 'Ivana Horvat' then
+    raise exception 'PAD — promjena imena za listić s lanca %', r;
+  end if;
+  perform pg_temp.expect_error(format('select domovina_ai._maksimir_set_public_for(%L, %L)', c, 'full'), 'no_ballot');
   perform domovina_ai._maksimir_set_public_for(a, null);
   if domovina_ai.maksimir_share(domovina_ai._maksimir_ballot_of(a)->>'share_id')->'card' <> 'null'::jsonb then
     raise exception 'PAD — isključena kartica s lanca';

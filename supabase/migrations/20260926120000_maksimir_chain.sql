@@ -633,6 +633,47 @@ $$;
 revoke execute on function domovina_ai.maksimir_set_public_chain(text, bigint, text, text, jsonb) from public, anon;
 grant execute on function domovina_ai.maksimir_set_public_chain(text, bigint, text, text, jsonb) to authenticated, service_role;
 
+-- Promjena oblika imena (ili ponovno uključivanje) i za glasača čiji je listić na lancu:
+-- dosad je traženo da postoji listić faze 1 (no_ballot), a nakon prijenosa ga više nema.
+create or replace function domovina_ai._maksimir_set_public_for(p_user_id uuid, p_mode text)
+returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_hash  text;
+  v_voter domovina_ai.maksimir_voters%rowtype;
+begin
+  if p_mode is not null and p_mode not in ('full', 'initial', 'anon') then
+    raise exception 'invalid_mode';
+  end if;
+  if p_mode is null then
+    update domovina_ai.maksimir_voters v set public_mode = null, public_at = null
+      from public.identity_verifications iv
+     where iv.user_id = p_user_id and v.oib_hash = iv.oib_hash;
+    return domovina_ai._maksimir_ballot_of(p_user_id);
+  end if;
+
+  if p_user_id is not null then
+    select iv.oib_hash into v_hash from public.identity_verifications iv where iv.user_id = p_user_id;
+  end if;
+  if v_hash is null then raise exception 'not_verified'; end if;
+  select * into v_voter from domovina_ai.maksimir_voters where oib_hash = v_hash for update;
+  if not found or v_voter.consented_at is null then raise exception 'terms_not_accepted'; end if;
+  if not exists (select 1 from domovina_ai.maksimir_ballots b where b.voter_id = v_voter.id)
+     and not exists (select 1 from domovina_ai.maksimir_chain_public cp where cp.voter_id = v_voter.id) then
+    raise exception 'no_ballot';
+  end if;
+
+  update domovina_ai.maksimir_voters
+     set public_mode = p_mode, public_at = coalesce(public_at, pg_catalog.now())
+   where id = v_voter.id;
+  if not exists (select 1 from domovina_ai.maksimir_shares where voter_id = v_voter.id) then
+    insert into domovina_ai.maksimir_shares (id, kind, voter_id)
+    values (domovina_ai._maksimir_new_share_id(), 'public', v_voter.id);
+  end if;
+  return domovina_ai._maksimir_ballot_of(p_user_id);
+end;
+$$;
+
 -- ----- anonimna objava na lancu: kratka poveznica ----------------------------------------------------
 -- Baza ne zna je li transakcija stvarna; stranica objave to provjerava s lanca (AnonymousShare).
 -- Ključ je tx_hash: ista transakcija uvijek daje istu poveznicu.
