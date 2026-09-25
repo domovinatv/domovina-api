@@ -1,4 +1,4 @@
--- Provjera migracije 20260925160000 (Maksimir — javni glas i anonimni ZK dokaz).
+-- Provjera migracija 20260925160000 i 20260925170000 (Maksimir — javni glas i anonimni ZK dokaz).
 --
 -- Pokretanje nad lokalnim stackom (idempotentno — briše svoj trag na početku i kraju):
 --   psql "postgresql://postgres:postgres@127.0.0.1:55322/postgres" \
@@ -11,16 +11,19 @@
 \set ON_ERROR_STOP on
 \timing off
 
+-- Redoslijed je bitan: brisanje glasača briše člana ZK grupe, a okidač tada
+-- zapisuje 'remove' u zapisnik — zato se zapisnici brišu tek na kraju.
+-- Briše i trag web/scripts/zk-e2e.mjs (e2e-zk-*), jer se brojevi provjeravaju apsolutno.
 create or replace function pg_temp.cleanup() returns void language sql as $$
+  delete from domovina_ai.maksimir_shares;
+  delete from domovina_ai.maksimir_voters where oib_hash like 'test-mzk-%' or oib_hash like 'e2e-zk-%';
+  delete from auth.users where email like 'test-mzk-%@example.com' or email like 'e2e-zk-%@example.com';
   alter table domovina_ai.maksimir_log disable trigger user;
   delete from domovina_ai.maksimir_log;
   alter table domovina_ai.maksimir_log enable trigger user;
   alter table domovina_ai.maksimir_zk_log disable trigger user;
   delete from domovina_ai.maksimir_zk_log;
   alter table domovina_ai.maksimir_zk_log enable trigger user;
-  delete from domovina_ai.maksimir_shares;
-  delete from domovina_ai.maksimir_voters where oib_hash like 'test-mzk-%';
-  delete from auth.users where email like 'test-mzk-%@example.com';
   update domovina_ai.maksimir_settings set opens_at = null, closes_at = '2027-12-31 23:59:59 Europe/Zagreb';
 $$;
 select pg_temp.cleanup();
@@ -196,6 +199,21 @@ begin
     raise exception 'PAD — snapshot v2 %', r - 'results';
   end if;
   raise notice 'OK — snapshot v2: vrh lanca listića + vrh ZK grupe + broj javnih glasača';
+end;
+$$;
+
+\echo '--- 9b. brisanje glasača zapisuje remove (migracija 20260925170000)'
+do $$
+declare r jsonb; n int;
+begin
+  delete from domovina_ai.maksimir_voters where oib_hash = 'test-mzk-C';        -- član '333'
+  r := domovina_ai.maksimir_zk_head();
+  select count(*) filter (where op = 'add') - count(*) filter (where op = 'remove') into n from domovina_ai.maksimir_zk_log;
+  if (r->>'seq')::int <> 5 or (r->>'members')::int <> 1 or n <> 1
+     or (select op || ':' || commitment from domovina_ai.maksimir_zk_log where seq = 5) <> 'remove:333' then
+    raise exception 'PAD — brisanje glasača nije zapisalo remove %', r;
+  end if;
+  raise notice 'OK — brisanje glasača: remove u zapisniku, zapisnik i broj članova usklađeni';
 end;
 $$;
 
