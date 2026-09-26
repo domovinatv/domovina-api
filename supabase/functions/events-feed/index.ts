@@ -105,6 +105,8 @@ function parseIso(v: string | null): string | null {
 }
 
 function clampInt(v: string | null, min: number, max: number, fallback: number): number {
+  // Number(null) i Number("") su 0, pa bi izostavljen ?limit postao min (1), ne fallback.
+  if (v === null || v.trim() === "") return fallback;
   const n = Number(v);
   if (!Number.isInteger(n)) return fallback;
   return Math.min(Math.max(n, min), max);
