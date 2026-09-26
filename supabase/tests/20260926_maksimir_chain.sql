@@ -252,6 +252,19 @@ begin
 end;
 $$;
 
+\echo '--- 13b. I-09: javno poznat (slab) ključ se ne može registrirati'
+do $$
+declare
+  zero constant text := '21497490684358944318340363912423290848735924644571588152917059683632781422821';
+begin
+  if (select count(*) from domovina_ai.maksimir_weak_commitments) <> 256 then raise exception 'PAD — 256 slabih commitmenta'; end if;
+  perform domovina_ai._maksimir_accept_chain_terms_for('00000000-0000-4000-8000-0000000cc002');
+  perform pg_temp.expect_error(format('select domovina_ai._maksimir_chain_register_for(%L, 10200, %L, %L)',
+    '00000000-0000-4000-8000-0000000cc002', '0x00000000000000000000000000000000000000bb', zero), 'weak_commitment');
+  raise notice 'OK — commitment ključa od nula (abandon ×23 art) odbijen: weak_commitment';
+end;
+$$;
+
 \echo '--- 14. anon ne smije zvati registrar ni interne funkcije'
 begin;
 set local role anon;

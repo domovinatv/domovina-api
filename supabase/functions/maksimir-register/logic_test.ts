@@ -95,6 +95,7 @@ Deno.test("greške baze → poznat kod ili server_error", async () => {
   assertEquals((await handle("Bearer ok", body(), fail("chain_terms_not_accepted"))).status, 403);
   assertEquals((await handle("Bearer ok", body(), fail("not_verified"))).status, 403);
   assertEquals((await handle("Bearer ok", body(), fail("voting_closed"))).status, 409);
+  assertEquals((await handle("Bearer ok", body(), fail("weak_commitment"))).body.error, "weak_commitment");
   const r = await handle("Bearer ok", body(), fail("relation does not exist"));
   assertEquals([r.status, r.body.error], [500, "server_error"]);
 });

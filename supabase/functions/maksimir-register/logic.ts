@@ -52,6 +52,7 @@ const DB_ERRORS: Record<string, number> = {
   chain_terms_not_accepted: 403,
   unknown_chain: 400,
   invalid_commitment: 400,
+  weak_commitment: 400, // javno poznat ključ (npr. same nule), nalaz I-09
   voting_closed: 409,
 };
 
