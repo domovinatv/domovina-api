@@ -194,7 +194,8 @@ begin
 
   -- 9. snapshot v2
   r := domovina_ai.maksimir_snapshot();
-  if r->>'schema' <> 'maksimir-snapshot/2' or (r->'zk'->>'seq')::int <> 4 or r->'zk'->>'hash' <> prev
+  -- v3 (20260926120000) je nadskup v2: ista polja + chain_from, phase1_final
+  if r->>'schema' not in ('maksimir-snapshot/2', 'maksimir-snapshot/3') or (r->'zk'->>'seq')::int <> 4 or r->'zk'->>'hash' <> prev
      or (r->>'public_voters')::int <> 1 or r->'head' is null then
     raise exception 'PAD — snapshot v2 %', r - 'results';
   end if;
