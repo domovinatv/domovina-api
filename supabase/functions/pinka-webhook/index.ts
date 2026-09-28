@@ -74,7 +74,8 @@ Deno.serve(async (req) => {
       .from("contributions")
       .select("id, link_preview")
       .not("link_preview->>image", "is", null)
-      .is("link_preview->>image_cached", null)
+      // bez kopije ILI bez dimenzija (keširani prije 28.9.2026. popodne)
+      .or("link_preview->>image_cached.is.null,link_preview->>image_width.is.null")
       .limit(Math.min(Number(event.limit) || 50, 200));
     if (error) return json({ error: error.message }, 500);
     const rows = (data ?? []) as { id: string; link_preview: { image?: string } }[];

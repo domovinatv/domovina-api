@@ -60,9 +60,14 @@ export async function cacheLinkPreviewImage(
   // bucketu kao izvor istine (drugačija širina = samo drugi query).
   const cached = `${PUBLIC_BASE}/storage/v1/render/image/public/${OG_CACHE_BUCKET}/${path}` +
     `?width=${RENDER_WIDTH}&quality=80`;
+  // Dimenzije idu uz URL: zid mora znati omjer PRIJE učitavanja slike (visina
+  // pločice, portret lijevo / landscape ispod). null = nepoznato (AVIF…).
+  const dims = imageSize(img.bytes);
   const { error } = await admin.schema("pinka_finance").rpc("set_contribution_link_preview_image", {
     p_contribution_id: contributionId,
     p_image_cached: cached,
+    p_width: dims?.width ?? null,
+    p_height: dims?.height ?? null,
   });
   if (error) {
     console.warn(`[og-image-cache] rpc failed ${contributionId}: ${error.message}`);
@@ -193,4 +198,47 @@ export function isPublicIp(ip: string): boolean {
 async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/// Širina × visina iz zaglavlja PNG / JPEG / GIF / WebP, bez dekodiranja.
+export function imageSize(b: Uint8Array): { width: number; height: number } | null {
+  const u16be = (o: number) => (b[o] << 8) | b[o + 1];
+  const u16le = (o: number) => b[o] | (b[o + 1] << 8);
+  const u24le = (o: number) => b[o] | (b[o + 1] << 8) | (b[o + 2] << 16);
+  const u32be = (o: number) => ((b[o] << 24) >>> 0) + ((b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]);
+  const ok = (w: number, h: number) => (w > 0 && h > 0 ? { width: w, height: h } : null);
+  if (b.length < 30) return null;
+  // PNG: IHDR je uvijek prvi chunk
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return ok(u32be(16), u32be(20));
+  // GIF87a / GIF89a
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return ok(u16le(6), u16le(8));
+  // WebP (RIFF....WEBP): VP8 / VP8L / VP8X
+  if (b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57 && b[9] === 0x45) {
+    const fourcc = String.fromCharCode(b[12], b[13], b[14], b[15]);
+    if (fourcc === "VP8 ") return ok(u16le(26) & 0x3fff, u16le(28) & 0x3fff);
+    if (fourcc === "VP8L") {
+      const bits = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
+      return ok((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1);
+    }
+    if (fourcc === "VP8X") return ok(u24le(24) + 1, u24le(27) + 1);
+    return null;
+  }
+  // JPEG: prvi SOFn marker (preskače APPn/DQT/DHT…)
+  if (b[0] === 0xff && b[1] === 0xd8) {
+    let o = 2;
+    while (o + 9 < b.length) {
+      if (b[o] !== 0xff) return null;
+      const m = b[o + 1];
+      if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) {
+        o += 2;
+        continue;
+      }
+      const len = u16be(o + 2);
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+        return ok(u16be(o + 7), u16be(o + 5));
+      }
+      o += 2 + len;
+    }
+  }
+  return null;
 }
