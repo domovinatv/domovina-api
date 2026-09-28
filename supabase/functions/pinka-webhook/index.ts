@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { cacheLinkPreviewImage } from "./og-image-cache.ts";
+import { cacheLinkPreviewImage } from "../_shared/og-image-cache.ts";
 
 // pinka-webhook — prima OUTBOUND "intent.paid" webhook s pay.domovina.ai rail-a
 // (src/intents/outbound.ts) i oznacava doprinos placenim. Idempotentno: trigeri

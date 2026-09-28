@@ -36,13 +36,15 @@ const EXT_BY_TYPE: Record<string, string> = {
   "image/avif": "avif",
 };
 
-/// Skini, spremi i dopiši `image_cached` u `link_preview`. Vraća javni URL ili
-/// null (bilo koji kvar = kartica ostaje tekstualna, kao i prije).
-export async function cacheLinkPreviewImage(
+export type StoredOgImage = { url: string; width: number | null; height: number | null };
+
+/// Skini sliku i spremi je u `pinka-og-cache` (ključ = sha256 izvornog URL-a,
+/// pa ista slika iz previewa u obrascu i iz webhooka nakon plaćanja završi u
+/// ISTOM objektu). Vraća javni render URL + dimenzije, ili null.
+export async function storeOgImage(
   admin: SupabaseClient,
-  contributionId: string,
   imageUrl: string | null | undefined,
-): Promise<string | null> {
+): Promise<StoredOgImage | null> {
   if (!imageUrl) return null;
   const img = await fetchPublicImage(imageUrl);
   if (!img) return null;
@@ -55,25 +57,37 @@ export async function cacheLinkPreviewImage(
     console.warn(`[og-image-cache] upload failed ${path}: ${upErr.message}`);
     return null;
   }
-
   // imgproxy render: resize na širinu kartice i recompress; izvornik ostaje u
   // bucketu kao izvor istine (drugačija širina = samo drugi query).
-  const cached = `${PUBLIC_BASE}/storage/v1/render/image/public/${OG_CACHE_BUCKET}/${path}` +
+  const url = `${PUBLIC_BASE}/storage/v1/render/image/public/${OG_CACHE_BUCKET}/${path}` +
     `?width=${RENDER_WIDTH}&quality=80`;
   // Dimenzije idu uz URL: zid mora znati omjer PRIJE učitavanja slike (visina
   // pločice, portret lijevo / landscape ispod). null = nepoznato (AVIF…).
   const dims = imageSize(img.bytes);
+  return { url, width: dims?.width ?? null, height: dims?.height ?? null };
+}
+
+/// Skini, spremi i dopiši `image_cached` (+ dimenzije) u `link_preview`
+/// doprinosa. Vraća javni URL ili null (bilo koji kvar = kartica ostaje
+/// tekstualna, kao i prije).
+export async function cacheLinkPreviewImage(
+  admin: SupabaseClient,
+  contributionId: string,
+  imageUrl: string | null | undefined,
+): Promise<string | null> {
+  const stored = await storeOgImage(admin, imageUrl);
+  if (!stored) return null;
   const { error } = await admin.schema("pinka_finance").rpc("set_contribution_link_preview_image", {
     p_contribution_id: contributionId,
-    p_image_cached: cached,
-    p_width: dims?.width ?? null,
-    p_height: dims?.height ?? null,
+    p_image_cached: stored.url,
+    p_width: stored.width,
+    p_height: stored.height,
   });
   if (error) {
     console.warn(`[og-image-cache] rpc failed ${contributionId}: ${error.message}`);
     return null;
   }
-  return cached;
+  return stored.url;
 }
 
 async function fetchPublicImage(raw: string): Promise<{ bytes: Uint8Array; type: string } | null> {
