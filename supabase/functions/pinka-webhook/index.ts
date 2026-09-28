@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { cacheLinkPreviewImage } from "./og-image-cache.ts";
 
 // pinka-webhook — prima OUTBOUND "intent.paid" webhook s pay.domovina.ai rail-a
 // (src/intents/outbound.ts) i oznacava doprinos placenim. Idempotentno: trigeri
@@ -63,6 +64,27 @@ Deno.serve(async (req) => {
     return json({ ok: true, created: (row as { created?: boolean } | null)?.created === true }, 200);
   }
 
+  // Jednokratna dopuna: doprinosi koji imaju `link_preview.image`, a nemaju
+  // keširanu kopiju (prije 28.9.2026. slika se samo spremala kao tuđi URL).
+  // Isti HMAC potpis kao pravi webhookovi — nije javno okidljivo.
+  if (event.type === "og.image_backfill") {
+    const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+    const { data, error } = await admin
+      .schema("pinka_finance")
+      .from("contributions")
+      .select("id, link_preview")
+      .not("link_preview->>image", "is", null)
+      .is("link_preview->>image_cached", null)
+      .limit(Math.min(Number(event.limit) || 50, 200));
+    if (error) return json({ error: error.message }, 500);
+    const rows = (data ?? []) as { id: string; link_preview: { image?: string } }[];
+    let cached = 0;
+    for (const r of rows) {
+      if (await cacheLinkPreviewImage(admin, r.id, r.link_preview?.image)) cached++;
+    }
+    return json({ ok: true, candidates: rows.length, cached }, 200);
+  }
+
   if (event.type !== "intent.paid") {
     return json({ ok: true, ignored: event.type }, 200);
   }
@@ -118,10 +140,13 @@ async function enrichLinkPreview(sid: string) {
   if (!res.ok) return;
   const { preview } = (await res.json()) as { preview?: unknown };
   if (!preview) return;
-  await admin.schema("pinka_finance").rpc("set_contribution_link_preview", {
+  const { error } = await admin.schema("pinka_finance").rpc("set_contribution_link_preview", {
     p_contribution_id: row.id,
     p_preview: preview,
   });
+  if (error) return;
+  // Slika se kešira TEK nakon što preview postoji (RPC dopisuje u njega).
+  await cacheLinkPreviewImage(admin, row.id, (preview as { image?: string | null }).image);
 }
 
 function json(b: unknown, status: number) {
