@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { isPublicHttpsUrl, storeOgImage } from "../_shared/og-image-cache.ts";
+import { guestAllowed, guestKey, isGuestBearer } from "../_shared/guest.ts";
 
 // pinka-link-preview — OG preview poveznice DOK donator tipka obrazac podrške
 // (živi pregled kartice zida prije plaćanja).
@@ -11,9 +12,10 @@ import { isPublicHttpsUrl, storeOgImage } from "../_shared/og-image-cache.ts";
 // `pinka-og-cache` pod ISTIM ključem (sha256 URL-a) koji kasnije koristi
 // pinka-webhook — preview i kartica na zidu dijele jedan objekt.
 //
-// Zloupotreba: bez plaćanja bi ovo bio javni image-proxy, pa traži Supabase
-// sesiju (anon je OK — panel je ionako ima) i ograničenje po korisniku. Limit
-// je po instanci edge runtimea (in-memory), što je dovoljno za kočnicu.
+// Zloupotreba: bez plaćanja bi ovo bio javni image-proxy, pa je ograničen po
+// korisniku (in-memory, po instanci — korisnik je poznat), a GOST (bez sesije;
+// anonimne prijave se gase) po HMAC(IP) kroz pinka_finance.guest_rate_hit,
+// dijeljeno kroz sve instance — inače bi ovo bio javni image-proxy u R2.
 //
 // POST { url } → { preview: { url, title, description, siteName,
 //                             image_cached?, image_width?, image_height? } | null }
@@ -44,9 +46,18 @@ Deno.serve(async (req) => {
   const userClient = createClient(URL_, ANON, {
     global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
   });
-  const { data: { user } } = await userClient.auth.getUser();
-  if (!user) return json({ error: "not_authenticated" }, 401);
-  if (rateLimited(user.id)) return json({ error: "rate_limited" }, 429);
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const guest = isGuestBearer(authHeader, ANON);
+  const user = guest ? null : (await userClient.auth.getUser()).data.user;
+  if (!guest && !user) return json({ error: "not_authenticated" }, 401);
+  if (user && rateLimited(user.id)) return json({ error: "rate_limited" }, 429);
+  if (guest) {
+    const admin = createClient(URL_, SERVICE, { auth: { persistSession: false } });
+    // 30 / 10 min po IP-u: obrazac se tipka, preview se traži nakon debouncea
+    if (!(await guestAllowed(admin, await guestKey(req, "link-preview"), 30, 600))) {
+      return json({ error: "rate_limited" }, 429);
+    }
+  }
 
   const body = await req.json().catch(() => ({}));
   let target: URL;

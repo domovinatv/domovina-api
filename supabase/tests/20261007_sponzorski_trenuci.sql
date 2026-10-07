@@ -498,4 +498,59 @@ begin
   raise notice 'OK — grid: iznad cijene paid, null paid, ispod cijene underpaid';
 end $$;
 
+\echo '--- 19. anonimna sesija ne smije kupiti sponzorski trenutak ni uploadati logo'
+do $$
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"00000000-0000-4000-8000-0000000051b7","role":"authenticated","is_anonymous":true}', true);
+  begin
+    perform pinka_finance.create_sponsor_contribution('7e5a0f3e-2f1d-4c9b-9a51-0d0b1a5e7101',
+      array['oxq1U0xypu8@255'], 'X', null, null, null,
+      '{"company":"X","email":"x@example.com"}'::jsonb, true);
+    raise exception 'PAO TEST: anonimna sesija je kupila trenutak';
+  exception when others then
+    if sqlerrm <> 'login_required' then raise exception 'PAO TEST: kriva greška %', sqlerrm; end if;
+  end;
+  begin
+    insert into storage.objects (bucket_id, name, owner_id)
+    values ('sponsor-logos', '00000000-0000-4000-8000-0000000051b7/logo.png', '00000000-0000-4000-8000-0000000051b7');
+    raise exception 'PAO TEST: anonimna sesija je uploadala logo';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('role', 'postgres', true);
+  raise notice 'OK — anonimna sesija: login_required, upload odbijen';
+end $$;
+
+\echo '--- 20. limit gostiju po ključu i prozoru'
+do $$
+declare a boolean; b boolean; c boolean; d boolean;
+begin
+  delete from pinka_finance.guest_rate_hits where key like 'test:%';
+  a := pinka_finance.guest_rate_hit('test:ip1', 2, 3600);
+  b := pinka_finance.guest_rate_hit('test:ip1', 2, 3600);
+  c := pinka_finance.guest_rate_hit('test:ip1', 2, 3600);
+  d := pinka_finance.guest_rate_hit('test:ip2', 2, 3600);
+  if not (a and b and not c and d) then raise exception 'PAO TEST: limit % % % %', a, b, c, d; end if;
+  -- provjera bez brojanja ne troši kvotu
+  if pinka_finance.guest_rate_hit('test:ip3', 1, 3600, false) is not true
+     or pinka_finance.guest_rate_hit('test:ip3', 1, 3600, false) is not true
+     or exists (select 1 from pinka_finance.guest_rate_hits where key = 'test:ip3') then
+    raise exception 'PAO TEST: p_count=false je potrošio kvotu';
+  end if;
+  perform pinka_finance.guest_rate_hit('test:ip3', 1, 3600, true);
+  if pinka_finance.guest_rate_hit('test:ip3', 1, 3600, false) then
+    raise exception 'PAO TEST: provjera ne vidi potrošenu kvotu';
+  end if;
+  perform set_config('role', 'anon', true);
+  begin
+    perform pinka_finance.guest_rate_hit('test:x', 1, 60);
+    raise exception 'PAO TEST: anon smije zvati guest_rate_hit';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('role', 'postgres', true);
+  delete from pinka_finance.guest_rate_hits where key like 'test:%';
+  raise notice 'OK — limit gostiju: 2/2 prolaze, treći ne, drugi ključ neovisan';
+end $$;
+
 \echo 'SVE PROVJERE PROŠLE'

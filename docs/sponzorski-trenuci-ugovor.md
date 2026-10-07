@@ -1,6 +1,6 @@
 # Sponzorski trenuci — ugovor backend ↔ frontend
 
-*Status: **ugovor v1, 7.10.2026.** Backend (`domovina-api`) i frontend
+*Status: **ugovor v2, 7.10.2026.** (v2: anonimne prijave se gase — sponzor traži pravi račun, donacija ide kao gost, §9) Backend (`domovina-api`) i frontend
 (`domovina.ai`) rade isključivo po ovom dokumentu. Promjena ugovora = promjena
 ovog fajla u istom commitu kao i kod.*
 
@@ -99,7 +99,8 @@ Povučen trenutak (`message_hidden`) nestaje iz viewa isti tren.
 
 ## 4. Upload loga (prije plaćanja)
 
-1. Klijent ima Supabase sesiju (anonimna prijava je dovoljna).
+1. Klijent ima Supabase sesiju **s pravim računom** (Google, Apple ili e-pošta).
+   Anonimna sesija ne smije uploadati (RLS), a anonimne prijave se gase.
 2. Upload u bucket `sponsor-logos` na put **`<auth.uid()>/<bilo_koji_id>.<png|jpg|jpeg|webp>`**,
    `id` = `[A-Za-z0-9_-]{1,64}`.
 3. Ograničenja (bucket ih nameće, server ih ponovno provjerava u checkoutu):
@@ -112,7 +113,9 @@ Povučen trenutak (`message_hidden`) nestaje iz viewa isti tren.
 
 ## 5. Checkout — `POST /functions/v1/pinka-contribute`
 
-Postojeća funkcija, nova grana kad body ima `sponsor`. Header `Authorization: Bearer <access_token>`.
+Postojeća funkcija, nova grana kad body ima `sponsor`. Header `Authorization: Bearer <access_token>`
+**pravog računa**. Bez sesije ili s anonimnom sesijom → `401 login_required`; klijent tada
+nudi „Prijavi se s Googleom" i nastavlja checkout nakon prijave.
 
 ```json
 {
@@ -174,7 +177,7 @@ Kupnja nikad nije anonimna (DSA čl. 26).
 
 | HTTP | `error` | značenje / što klijent radi |
 |---|---|---|
-| 401 | `not_authenticated` | nema sesije |
+| 401 | `login_required` | nema sesije ili je anonimna — prijava (Google/Apple/e-pošta) pa ponovi |
 | 400 | `invalid_sponsor:<polje>` | validacija, npr. `invalid_sponsor:buyer_oib`, `invalid_sponsor:link_url`, `invalid_sponsor:logo_path`, `invalid_sponsor:terms` |
 | 400 | `not_sponsor_campaign` | kampanja nema `timeline` kartu |
 | 400 | `campaign_not_found` / `campaign_not_active` | |
@@ -250,3 +253,41 @@ Vlasnik pri svakoj prodaji dobije e-poštu s linkom
 `GET` prikazuje stranicu s gumbom, a tek `POST` (klik na gumb) postavlja
 `message_hidden = true`. Skeneri linkova u e-pošti zato ne mogu slučajno povući oglas.
 Frontend za ovo ne treba ništa.
+
+---
+
+## 9. Bez anonimnih prijava: gostujuća donacija
+
+Anonimne prijave se gase (`docs/sponzorski-trenuci-zakljucak.md` §7). Klijent
+**ne zove `signInAnonymously` nigdje** (ni pri pokretanju, ni nakon odjave,
+ni u `ensureSession`). Bez prijave korisnik nema Supabase sesiju i čita sve
+javno s anon ključem.
+
+**Donacija (SEPA panel) bez prijave** = isti `POST /functions/v1/pinka-contribute`,
+bez sesije (`Authorization: Bearer <anon key>`, što supabase klijent šalje sam):
+
+```json
+{ "campaign_id": "…", "amount_cents": 1000, "display_name": "…", "message": "…",
+  "anonymous": false, "slot_keys": null, "turnstile_token": "<Cloudflare Turnstile token>" }
+```
+
+| HTTP | `error` | |
+|---|---|---|
+| 401 | `login_required` | gost je poslao `slot_keys` (grid kvadratić, sjedalo, trenutak): mjesta traže pravi račun |
+| 401 | `not_authenticated` | poslan je bearer koji NIJE anon ključ, a sesija ne vrijedi (istekla) — osvježi sesiju; klijent ne smije tiho prijeći u gosta |
+| 403 | `captcha_failed` | Turnstile token nedostaje ili nije valjan. Provodi se tek kad je na backendu postavljen `TURNSTILE_SECRET_KEY`; klijent ga uvijek šalje. |
+| 429 | `rate_limited` | 30 uspješnih gostujućih doprinosa s iste IP adrese u satu (neuspjeli pokušaji se ne broje) |
+
+**Turnstile token je jednokratan**: troši se pri svakom zahtjevu. Nakon BILO
+KOJEG odgovora (i 400/409) widget se resetira prije ponovnog pokušaja.
+
+Ostali odgovori i greške su isti kao za prijavljenog korisnika. Gostujući
+doprinos nema account (kao dosadašnja anonimna sesija). Status se polla
+postojećim `rpc/contribution_status` s anon ključem.
+
+`pinka-link-preview` također radi bez sesije (limit po IP-u).
+
+Što i dalje traži **pravi račun** (nepromijenjeno): favoriti u oblaku,
+novčanik, pretplata, claim kanala, passkey, maksimir, brisanje računa,
+sponzorski checkout (§5) i **svaka rezervacija mjesta** (grid kvadratić,
+numerirano sjedalo) — `slot_keys` od gosta → `401 login_required`.

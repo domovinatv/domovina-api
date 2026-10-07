@@ -284,6 +284,12 @@ declare
   v_hold     timestamptz;
 begin
   if v_uid is null then raise exception 'not_authenticated'; end if;
+  -- Sponzor mora imati PRAVI račun (Google/Apple/e-pošta): provjerena e-pošta
+  -- za B2B i limit holdova po stvarnoj osobi, ne po besplatnoj anonimnoj sesiji
+  -- (P9). Anonimne prijave se gase — docs/sponzorski-trenuci-zakljucak.md §7.
+  if coalesce(((select auth.jwt()) ->> 'is_anonymous')::boolean, false) then
+    raise exception 'login_required';
+  end if;
 
   select * into v_campaign from pinka_finance.campaigns
    where id = p_campaign_id and deleted_at is null;
@@ -791,10 +797,10 @@ revoke execute on function pinka_finance.seed_timeline_episode(uuid,text,smallin
 grant  execute on function pinka_finance.seed_timeline_episode(uuid,text,smallint,jsonb) to service_role;
 
 -- ----- 12. storage: sponsor-logos --------------------------------------------
--- Javno čitanje (logo se prikazuje u playeru), upload samo u vlastitu mapu.
--- BEZ KYC-a (za razliku od pinka-covers): brand kupuje s anonimnom sesijom,
--- a logo postaje javno vidljiv u viewu tek nakon plaćanja. Nema update/delete:
--- kreativa koja je plaćena ne smije se tiho zamijeniti.
+-- Javno čitanje (logo se prikazuje u playeru), upload samo u vlastitu mapu i
+-- samo s pravim računom (anonimna sesija ne). BEZ KYC-a (za razliku od
+-- pinka-covers): logo postaje javno vidljiv u viewu tek nakon plaćanja.
+-- Nema update/delete: plaćena kreativa ne smije se tiho zamijeniti.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('sponsor-logos', 'sponsor-logos', true, 204800,
         array['image/png', 'image/jpeg', 'image/webp'])
@@ -810,6 +816,7 @@ create policy sponsor_logos_insert on storage.objects
     bucket_id = 'sponsor-logos'
     and (storage.foldername(name))[1] = (select auth.uid())::text
     and name ~ '^[0-9a-f-]{36}/[A-Za-z0-9_-]{1,64}\.(png|jpe?g|webp)$'
+    and not coalesce(((select auth.jwt()) ->> 'is_anonymous')::boolean, false)
   );
 
 -- ----- 13. pg_cron (opcionalno; ispravnost NE ovisi o ovome) ----------------

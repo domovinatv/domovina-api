@@ -77,6 +77,8 @@ SPONSOR_OWNER_EMAIL=vlasnik@example.com
 SPONSOR_MODERATION_SECRET=e2e-moderation-secret-0123456789
 SPONSOR_CRON_SECRET=e2e-cron-secret-0123456789abcdef
 PUBLIC_FUNCTIONS_URL=http://127.0.0.1:55321/functions/v1
+TURNSTILE_SECRET_KEY=e2e-turnstile-secret
+TURNSTILE_VERIFY_URL=http://host.docker.internal:54999/turnstile
 EOF
 supabase functions serve --env-file /tmp/e2e.env &
 supabase/tests/20261007_sponzorski_trenuci_e2e.sh
@@ -134,6 +136,7 @@ cd ~/git/domovinatv/domovina-api
 # 3. funkcije (_shared ide automatski uz --only)
 ./scripts/deploy-functions.sh --only=pinka-contribute
 ./scripts/deploy-functions.sh --only=pinka-webhook
+./scripts/deploy-functions.sh --only=pinka-link-preview
 ./scripts/deploy-functions.sh --only=sponsor-moderate
 ./scripts/deploy-functions.sh --only=sponsor-cron --restart -y
 
@@ -191,6 +194,7 @@ prethodna verzija je u `20260722120000_pinka_slots.sql` §15.
 | `SPONSOR_MODERATION_SECRET` | da | webhook, `sponsor-moderate` | ≥ 16 znakova; bez njega e-pošta nema link za povlačenje |
 | `SPONSOR_CRON_SECRET` | da | `sponsor-cron` | ≥ 16 znakova |
 | `PUBLIC_FUNCTIONS_URL` | ne | webhook | zadano `https://api.domovina.ai/functions/v1` (link u e-pošti) |
+| `TURNSTILE_SECRET_KEY` | preporučeno | `pinka-contribute` | kad je postavljen, gostujuća donacija traži valjan Turnstile token; bez njega vrijedi samo limit po IP-u |
 | `INTENT_WEBHOOK_SECRET`, `PINKA_INTENTS_URL` | već postoje | | nepromijenjeno |
 
 ---
@@ -232,4 +236,66 @@ Nova pitanja iz ovog kruga:
 |---|---|
 | P7 | EU kupac s VAT ID-om bez OIB-a: prijenos porezne obveze (AE, 0 %) umjesto 25 %? Kod sada naplaćuje 25 % (konzervativno). |
 | P8 | DSA čl. 26 traži da se vidi **tko je platio**. View pokazuje `brand`. Ako agencija kupuje za brand, treba li javno pokazati `buyer_company`? Ugovor ga sada drži privatnim. |
-| P9 | **Blokiranje inventara besplatnim holdovima.** Produkcija ima `ENABLE_ANONYMOUS_USERS`. Svaka nova anonimna sesija smije držati 3 trenutka do 24 h (vijek intenta), pa skripta može zaključati sve trenutke bez plaćanja. Limit po sesiji to ne sprječava. Prijedlog: Turnstile u checkoutu + limit po IP-u u `pinka-contribute`, ili kraći hold dok uplata nije viđena. Treba odluku prije javnog linka. |
+| P9 | ✅ *riješeno 7.10.2026. (§7): sponzorski checkout traži pravi račun.* **Blokiranje inventara besplatnim holdovima.** Produkcija ima `ENABLE_ANONYMOUS_USERS`. Svaka nova anonimna sesija smije držati 3 trenutka do 24 h (vijek intenta), pa skripta može zaključati sve trenutke bez plaćanja. Limit po sesiji to ne sprječava. Prijedlog: Turnstile u checkoutu + limit po IP-u u `pinka-contribute`, ili kraći hold dok uplata nije viđena. Treba odluku prije javnog linka. |
+
+---
+
+## 7. Gašenje anonimnih prijava (odluka 7.10.2026.)
+
+**Zašto.** Na produkciji je 3.028 od 3.068 korisnika anonimno (99 %). Svaki
+posjetitelj dobiva anonimnog korisnika pri pokretanju aplikacije, a samo 3 su
+ikad prešla u stalni račun. Anonimni korisnik nema personal account, pa nema
+ni podataka za migraciju. Prijelaz anon → stalni bio je izvor support problema
+(utrka s OAuth callbackom, `linkIdentity` za korisnika koji se vraća).
+
+**Što je anonimna sesija stvarno nosila:** samo uplatu bez prijave (`pinka-contribute`,
+`pinka-link-preview`). Sve ostalo već traži pravi račun ili radi bez sesije
+(ulaznice preko `events-order`, javni viewovi).
+
+**Odluka:**
+- sponzorski checkout i upload loga traže **pravi račun** (`login_required`);
+- donacija ide **kao gost**, bez lažnog korisnika (ugovor §9).
+
+**Backend (gotovo, lokalno testirano):**
+
+| | |
+|---|---|
+| `create_sponsor_contribution` | anonimni JWT → `login_required` |
+| RLS `sponsor_logos_insert` | anonimni JWT odbijen |
+| `pinka-contribute` | gost = bez bearera ili s anon ključem (bez poziva GoTrueu); svaki drugi bearer koji ne prođe → 401, nikad tihi gost. Gost: service klijent (`auth.uid()` = null), Turnstile ako je `TURNSTILE_SECRET_KEY` postavljen, 30 USPJEŠNIH / sat / IP preko `guest_rate_hit` (migracija `20261007130000`, ključ = HMAC(`cf-connecting-ip`), IP se ne sprema). Gost ne smije rezervirati mjesta (grid/sjedala/trenuci) → 401 `login_required`, inače P9 vrijedi i za grid. Sponzor bez pravog računa → 401 `login_required`. |
+| `pinka-link-preview` | gost dopušten, 30 / 10 min po HMAC(IP), dijeljeno kroz instance (`guest_rate_hit`) |
+
+`cf-connecting-ip` se smije vjerovati jer origin nije dostupan mimo Cloudflarea
+(7.10.2026.: portovi 80/443/8000/8443/54321 na IP-u servera ne odgovaraju).
+Ako se origin ikad otvori, ključ limita postaje podmetljiv — tada ostaje samo Turnstile.
+
+**Gubi se:** kupnja grid kvadratića / numeriranog sjedala bez prijave (grid
+karta na produkciji). Donacija bez mjesta i ulaznice (`events-order`) ostaju gostujuće.
+| `config.toml` | `enable_anonymous_sign_ins = false` izričito |
+
+Testovi: SQL blokovi 19–20, E2E korak 10 (gost-sponzor 401, loš Turnstile 403,
+donacija 200 bez accounta, 11. zahtjev 429, status poll s anon ključem).
+
+**Redoslijed gašenja na produkciji:**
+
+1. Backend iz §3 (migracije + `pinka-contribute`, `pinka-link-preview`). Aditivno:
+   dok su anonimne prijave uključene, stari klijenti s anonimnom sesijom rade
+   kao i prije (osim sponzorskog checkouta, koji je nov).
+2. Frontend release bez `signInAnonymously` (ugovor §9) + Turnstile widget u
+   SEPA panelu. Turnstile site/secret ključ: Cloudflare dashboard → Turnstile.
+3. `./scripts/coolify-env-set.sh TURNSTILE_SECRET_KEY=… -y --recreate-service=supabase-edge-functions`
+4. Pričekati da stare iOS/Android verzije izađu iz upotrebe (ili prisilno
+   ažuriranje). Turnstile vrijedi samo za zahtjeve BEZ sesije, pa stare
+   aplikacije s anonimnom sesijom do koraka 5 rade normalno. Nakon koraka 5
+   stara aplikacija se i dalje pokreće (greška je uhvaćena), ali joj odjava
+   pokaže grešku, a donacija bez prijave ide kao gost bez Turnstile tokena →
+   `captcha_failed`.
+5. Ugasiti u GoTrueu:
+   ```bash
+   ./scripts/coolify-env-set.sh GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=false -y
+   ./scripts/coolify-env-set.sh ENABLE_ANONYMOUS_USERS=false -y --recreate-service=supabase-auth
+   ```
+6. Po želji: obrisati stare anonimne korisnike (nemaju accounte; doprinosi na
+   njih ne pokazuju, `contributor_account_id` je null):
+   `delete from auth.users where is_anonymous and created_at < now() - interval '30 days';`
+   — tek nakon koraka 5 i uz backup `auth` sheme.

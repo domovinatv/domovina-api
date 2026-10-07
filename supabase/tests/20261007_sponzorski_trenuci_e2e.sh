@@ -33,6 +33,7 @@ q "update pinka_finance.slots set state='free', contribution_id=null, holder_acc
    where slot_key in ('$K_OK','$K_UNDER','$K_RACE')" >/dev/null
 # Plaćeni doprinosi iz SQL testa bi inače ušli u cron (račun, e-pošta) i
 # pomiješali brojanje poziva — označi ih kao već obrađene.
+q "delete from pinka_finance.guest_rate_hits" >/dev/null
 q "update pinka_finance.contributions set invoice_state='skipped', owner_notified_at=coalesce(owner_notified_at, now())
    where campaign_id='$CAMPAIGN' and is_sponsor" >/dev/null
 curl -s -XPOST "$MOCK/_reset" >/dev/null
@@ -182,6 +183,40 @@ curl -s -o /dev/null -XPOST "$API/functions/v1/sponsor-moderate" -d "c=$CID&t=$T
 [ "$(curl -s "$API/rest/v1/public_live_moments?slot_key=eq.$K_OK" -H "apikey: $ANON_KEY" -H 'Accept-Profile: pinka_finance')" = "[]" ] \
   || fail "povučen trenutak i dalje u viewu"
 echo "OK — povlačenje: GET ne mijenja ništa, loš token 403, POST skida trenutak"
+
+# ── 10. GOST (bez sesije): donacija da, sponzor ne; Turnstile; limit po IP-u ─
+DONATION=$(q "select id from pinka_finance.campaigns where slug='podrzi-domovina-podcast'")
+q "delete from pinka_finance.guest_rate_hits" >/dev/null
+guest() {  # $1 body
+  curl -s -w '\n%{http_code}\n' -XPOST "$API/functions/v1/pinka-contribute" \
+    -H "Authorization: Bearer $ANON_KEY" -H 'content-type: application/json' -d "$1"
+}
+out=$(guest "{\"campaign_id\":\"$CAMPAIGN\",\"slot_keys\":[\"$K_UNDER\"],\"turnstile_token\":\"ok\",\"sponsor\":{\"brand\":\"G\",\"terms_accepted\":true,\"buyer\":{\"company\":\"G\",\"email\":\"g@example.com\"}}}")
+[ "$(tail -1 <<<"$out")" = 401 ] && grep -q login_required <<<"$out" || fail "gost-sponzor: $out"
+out=$(guest "{\"campaign_id\":\"$DONATION\",\"amount_cents\":1000,\"turnstile_token\":\"krivo\"}")
+[ "$(tail -1 <<<"$out")" = 403 ] && grep -q captcha_failed <<<"$out" || fail "loš turnstile: $out"
+out=$(guest "{\"campaign_id\":\"$DONATION\",\"amount_cents\":1000,\"turnstile_token\":\"ok\",\"display_name\":\"Gost\"}")
+[ "$(tail -1 <<<"$out")" = 200 ] || fail "gostujuća donacija: $out"
+GCID=$(head -1 <<<"$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["contribution_id"])')
+[ "$(q "select (contributor_account_id is null)::text || ':' || state from pinka_finance.contributions where id='$GCID'")" = "true:pending" ] \
+  || fail "gostujući doprinos"
+# gost s mjestima → login_required (P9 i za grid)
+out=$(guest "{\"campaign_id\":\"$DONATION\",\"amount_cents\":1000,\"turnstile_token\":\"ok\",\"slot_keys\":[\"0:0\"]}")
+[ "$(tail -1 <<<"$out")" = 401 ] && grep -q login_required <<<"$out" || fail "gost s mjestima: $out"
+# istekla/kriva sesija NIJE gost
+out=$(curl -s -w '\n%{http_code}\n' -XPOST "$API/functions/v1/pinka-contribute" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.e30.x" \
+  -H 'content-type: application/json' -d "{\"campaign_id\":\"$DONATION\",\"amount_cents\":1000}")
+[ "$(tail -1 <<<"$out")" = 401 ] && grep -q not_authenticated <<<"$out" || fail "nevaljana sesija nije 401: $out"
+# neuspjeli pokušaji (400) ne troše kvotu; 30 uspješnih u satu, 31. → 429
+for i in $(seq 1 5); do guest "{\"campaign_id\":\"$DONATION\",\"amount_cents\":0,\"turnstile_token\":\"ok\"}" >/dev/null; done
+for i in $(seq 2 30); do guest "{\"campaign_id\":\"$DONATION\",\"amount_cents\":1000,\"turnstile_token\":\"ok\"}" | tail -1 | grep -qx 200 || fail "uspješan gost $i nije 200"; done
+out=$(guest "{\"campaign_id\":\"$DONATION\",\"amount_cents\":1000,\"turnstile_token\":\"ok\"}")
+[ "$(tail -1 <<<"$out")" = 429 ] || fail "31. gostujući doprinos nije 429: $out"
+st=$(curl -s -XPOST "$API/rest/v1/rpc/contribution_status" -H "apikey: $ANON_KEY" -H 'Content-Profile: pinka_finance' \
+  -H 'content-type: application/json' -d "{\"p_contribution_id\":\"$GCID\"}")
+grep -q pending <<<"$st" || fail "gost ne može pollati status: $st"
+q "delete from pinka_finance.guest_rate_hits" >/dev/null
+echo "OK — gost: sponzor i mjesta 401 login_required, istekla sesija 401, loš Turnstile 403, donacija 200 bez accounta, neuspjesi ne troše kvotu, 31. u satu 429, status poll radi"
 
 # ── 9. cron bez tajne ───────────────────────────────────────────────────────
 [ "$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$API/functions/v1/sponsor-cron")" = 401 ] || fail "cron bez tajne"

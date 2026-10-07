@@ -46,6 +46,10 @@ additional_redirect_urls = [
 ]
 jwt_expiry = 3600
 enable_signup = true
+# Anonimne prijave su ISKLJUČENE (i na produkciji nakon 7.10.2026. plana):
+# uplata bez prijave ide kao gost (pinka-contribute bez sesije), ne kao lažni
+# korisnik. Vidi docs/sponzorski-trenuci-zakljucak.md §7.
+enable_anonymous_sign_ins = false
 
 # Google login provider (GoTrue-native OAuth). Odvojen od youtube-claim Google
 # clienta (Princip D — vidi supabase/functions/.env). client_id/secret se
@@ -71,13 +75,13 @@ verify_jwt = false   # login/register-new nemaju sesiju; auth se interno provjer
 verify_jwt = false   # bridge prima Certilia idToken (verificira se interno vs JWKS), ne GoTrue JWT
 
 [functions.pinka-contribute]
-verify_jwt = false   # interno getUser (anon sesija je OK); create_contribution ide preko user klijenta
+verify_jwt = false   # sesija ILI gost (bez sesije: Turnstile + limit po IP-u, service klijent); sponzor/mjesta traže pravi račun
 
 [functions.pinka-webhook]
 verify_jwt = false   # server-to-server s pay rail-a; autentikacija je svix HMAC potpis, ne JWT
 
 [functions.pinka-link-preview]
-verify_jwt = false   # interno getUser (anon sesija je OK) + rate limit po korisniku; javni OG preview u obrascu podrške
+verify_jwt = false   # sesija ILI gost; limit po korisniku / po HMAC(IP) za gosta; OG preview u obrascu podrške
 
 [functions.pinka-onchain-confirm]
 verify_jwt = false   # onchain verifikacija JE autorizacija (tx receipt na Gnosisu), poziva i anon donator

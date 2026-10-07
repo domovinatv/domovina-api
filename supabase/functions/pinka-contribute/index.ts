@@ -1,13 +1,20 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { guestAllowed, guestKey, isGuestBearer, turnstileOk } from "../_shared/guest.ts";
 
 // pinka-contribute — kreira pending doprinos i pripadajuci payment intent na
 // pay.domovina.ai rail-u, te vraca EPC QR podatke koje klijent (domovina.ai
 // Flutter / pinka.finance) renderira i pokazuje korisniku za SEPA placanje.
 //
 // Tok:
-//   1. verificiraj korisnika (anon Supabase sesija je OK — ima JWT)
-//   2. create_contribution preko USER klijenta → auth.uid() rezolvira account
+//   1. korisnik ILI gost. Gost = nema sesije (anonimne prijave se gase,
+//      docs/sponzorski-trenuci-zakljucak.md §7): smije donirati, s limitom po
+//      IP-u i Turnstileom kad je TURNSTILE_SECRET_KEY postavljen. Gost ide
+//      service klijentom → auth.uid() = null → doprinos bez accounta (isto kao
+//      dosadašnja anonimna sesija, koja ionako nema personal account).
+//      Sponzorski checkout i rezervacija mjesta traže PRAVI račun.
+//   2. create_contribution preko USER klijenta (gost: service klijenta) →
+//      auth.uid() rezolvira account
 //      (+ atomarno rezervira odabrana mjesta ako su poslana slot_keys)
 //   3. POST pay-worker /api/intents (javni, target = campaign Safe)
 //   4. attach_intent (service_role) → sprema sid + produzuje hold na vijek intenta
@@ -33,6 +40,11 @@ const INTENTS_URL = Deno.env.get("PINKA_INTENTS_URL") ??
 // merchant webhook se ne emitira — sto znaci da SEPA nalog koji sjedne
 // prekonoc tiho propada. Trazimo maksimum koji rail dopusta.
 const INTENT_TTL_SECONDS = 86_400;
+
+// Gost: koliko USPJEŠNIH doprinosa s jednog IP-a u sat vremena. Iza jednog IP-a
+// zna biti puno ljudi (CGNAT, Wi-Fi na događaju), a pravu zaštitu od skripti
+// daje Turnstile — ovo je samo strop.
+const GUEST_LIMIT_PER_HOUR = 30;
 
 // Greske rezervacije mjesta nisu "los zahtjev" nego "netko te pretekao" —
 // klijent na 409 osvjezava mapu i ponovno bira, na 400 samo prikaze gresku.
@@ -70,8 +82,11 @@ Deno.serve(async (req) => {
   const userClient = createClient(URL, ANON, {
     global: { headers: { Authorization: authHeader } },
   });
-  const { data: { user } } = await userClient.auth.getUser();
-  if (!user) return json({ error: "not_authenticated" }, 401);
+  // Bez sesije klijent šalje anon ključ kao Bearer → gost (bez poziva GoTrueu).
+  // Svaki drugi bearer mora proći getUser; istekla sesija je 401, ne gost.
+  const guest = isGuestBearer(authHeader, ANON);
+  const user = guest ? null : (await userClient.auth.getUser()).data.user;
+  if (!guest && !user) return json({ error: "not_authenticated" }, 401);
 
   const body = await req.json().catch(() => ({}));
   const campaignId = body.campaign_id as string | undefined;
@@ -100,6 +115,22 @@ Deno.serve(async (req) => {
 
   const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
 
+  // Sponzor: pravi račun (provjerena e-pošta za B2B, limit holdova po osobi).
+  if (sponsor && (!user || user.is_anonymous)) return json({ error: "login_required" }, 401);
+  // Gost ne drži mjesta: hold bez računa ima kvotu po doprinosu ('c:<id>'),
+  // ne po osobi, pa bi skripta besplatno zaključala cijelu kartu (P9).
+  if (!user && slotKeys) return json({ error: "login_required" }, 401);
+
+  const rateKey = user ? null : await guestKey(req, "contribute");
+  if (rateKey) {
+    if (!(await guestAllowed(admin, rateKey, GUEST_LIMIT_PER_HOUR, 3600, false))) {
+      return json({ error: "rate_limited" }, 429);
+    }
+    if (!(await turnstileOk(body.turnstile_token, req))) return json({ error: "captcha_failed" }, 403);
+  }
+  // Gost piše service klijentom (auth.uid() = null); korisnik svojim JWT-om.
+  const rpcClient = user ? userClient : admin;
+
   // Higijena, ne ispravnost: istekli hold je vec nevidljiv u viewu i
   // preuzimljiv u reserve_slots. Ne cekamo rezultat.
   if (slotKeys) {
@@ -126,7 +157,7 @@ Deno.serve(async (req) => {
         p_buyer: (sponsor.buyer && typeof sponsor.buyer === "object") ? sponsor.buyer : null,
         p_terms_accepted: sponsor.terms_accepted === true,
       })
-    : await userClient
+    : await rpcClient
       .schema("pinka_finance")
       .rpc("create_contribution", {
         p_campaign_id: campaignId,
@@ -145,6 +176,8 @@ Deno.serve(async (req) => {
   }
   const row = Array.isArray(created) ? created[0] : created;
   if (!row?.contribution_id) return json({ error: "contribution_not_created" }, 500);
+  // Kvota gosta troši se tek na uspješan doprinos.
+  if (rateKey) await guestAllowed(admin, rateKey, GUEST_LIMIT_PER_HOUR, 3600, true);
 
   // 3) kreiraj payment intent na rail-u (javni endpoint)
   const intentRes = await fetch(INTENTS_URL, {

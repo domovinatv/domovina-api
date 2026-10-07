@@ -1,4 +1,5 @@
-// Lokalni mock za MPT (pay.domovina.ai /api/intents) i domovina-fiskal
+// Lokalni mock za MPT (pay.domovina.ai /api/intents), domovina-fiskal, Resend i
+// Turnstile siteverify (token "ok" prolazi)
 // (/api/v1/racun…) za E2E test sponzorskih trenutaka.
 //
 // Tijelo računa se validira PRAVOM zod shemom fiskala (racunModelShema iz
@@ -26,6 +27,12 @@ let nextId = 100;
 Deno.serve({ port, hostname: "0.0.0.0" }, async (req) => {
   const url = new URL(req.url);
   const path = url.pathname;
+  if (path === "/turnstile" && req.method === "POST") {
+    const f = await req.formData().catch(() => null);
+    const ok = f?.get("response") === "ok" && typeof f?.get("secret") === "string";
+    calls.push({ method: "POST", path, idempotencyKey: null, body: { response: f?.get("response") }, status: 200 });
+    return new Response(JSON.stringify({ success: ok }), { headers: { "content-type": "application/json" } });
+  }
   const body = req.method === "POST" ? await req.json().catch(() => null) : null;
   const idem = req.headers.get("Idempotency-Key");
   const reply = (status: number, b: unknown, headers: Record<string, string> = {}) => {
