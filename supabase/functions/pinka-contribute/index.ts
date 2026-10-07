@@ -16,6 +16,10 @@ import { corsHeaders } from "../_shared/cors.ts";
 // Mjesta (slots): grid kvadratic ili numerirano sjedalo. Rezervacija zivi u
 // istoj transakciji kao doprinos — inace bi postojao prozor u kojem doprinos
 // postoji bez mjesta. Vidi migraciju 20260722120000_pinka_slots.sql.
+//
+// Sponzorski trenutak (body.sponsor): kreativa + podaci kupca idu u
+// create_sponsor_contribution, iznos odredjuje server (zbroj cijena trenutaka).
+// Ugovor: docs/sponzorski-trenuci-ugovor.md §5.
 
 const URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -33,6 +37,17 @@ const INTENT_TTL_SECONDS = 86_400;
 // Greske rezervacije mjesta nisu "los zahtjev" nego "netko te pretekao" —
 // klijent na 409 osvjezava mapu i ponovno bira, na 400 samo prikaze gresku.
 const SLOT_CONFLICT = ["slot_taken", "too_many_holds", "amount_below_slot_price"];
+
+type Sponsor = {
+  brand?: unknown;
+  tagline?: unknown;
+  link_url?: unknown;
+  logo_path?: unknown;
+  terms_accepted?: unknown;
+  buyer?: unknown;
+};
+
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
 // Rail moze vratiti expires_at kao ISO string (HTTP API) ili UNIX broj
 // (sekunde). Normaliziramo na ISO string; null kad je odsutan/neispravan.
@@ -61,8 +76,10 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
   const campaignId = body.campaign_id as string | undefined;
   const amountCents = Number(body.amount_cents);
+  const sponsor = (body.sponsor && typeof body.sponsor === "object") ? body.sponsor as Sponsor : null;
   if (!campaignId) return json({ error: "campaign_id_required" }, 400);
-  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+  // Sponzorski checkout ne salje iznos — cijenu odredjuje server.
+  if (!sponsor && (!Number.isFinite(amountCents) || amountCents <= 0)) {
     return json({ error: "invalid_amount_cents" }, 400);
   }
 
@@ -92,20 +109,35 @@ Deno.serve(async (req) => {
     );
   }
 
+  if (sponsor && !slotKeys) return json({ error: "invalid_slot_keys" }, 400);
+
   // 2) kreiraj pending doprinos (RPC validira kampanju/tier/iznos + rezervira
   //    mjesta u ISTOJ transakciji — ako mjesto padne, doprinos ne nastane)
-  const { data: created, error: createErr } = await userClient
-    .schema("pinka_finance")
-    .rpc("create_contribution", {
-      p_campaign_id: campaignId,
-      p_amount_cents: amountCents,
-      p_tier_id: body.tier_id ?? null,
-      p_display_name: body.display_name ?? null,
-      p_message: body.message ?? null,
-      p_anonymous: body.anonymous ?? false,
-      p_quantity: body.quantity ?? 1,
-      p_slot_keys: slotKeys,
-    });
+  const { data: created, error: createErr } = sponsor
+    ? await userClient
+      .schema("pinka_finance")
+      .rpc("create_sponsor_contribution", {
+        p_campaign_id: campaignId,
+        p_slot_keys: slotKeys,
+        p_brand: str(sponsor.brand),
+        p_tagline: str(sponsor.tagline),
+        p_link_url: str(sponsor.link_url),
+        p_logo_path: str(sponsor.logo_path),
+        p_buyer: (sponsor.buyer && typeof sponsor.buyer === "object") ? sponsor.buyer : null,
+        p_terms_accepted: sponsor.terms_accepted === true,
+      })
+    : await userClient
+      .schema("pinka_finance")
+      .rpc("create_contribution", {
+        p_campaign_id: campaignId,
+        p_amount_cents: amountCents,
+        p_tier_id: body.tier_id ?? null,
+        p_display_name: body.display_name ?? null,
+        p_message: body.message ?? null,
+        p_anonymous: body.anonymous ?? false,
+        p_quantity: body.quantity ?? 1,
+        p_slot_keys: slotKeys,
+      });
   if (createErr) {
     const msg = createErr.message ?? "";
     const conflict = SLOT_CONFLICT.some((c) => msg.includes(c));
@@ -121,7 +153,7 @@ Deno.serve(async (req) => {
     body: JSON.stringify({
       target_address: row.destination_address,
       amount_eur: row.amount_cents / 100,
-      label: body.label ?? "pinka.finance",
+      label: sponsor ? "Sponzorski trenutak" : (body.label ?? "pinka.finance"),
       expires_in_seconds: INTENT_TTL_SECONDS,
       metadata: { campaign_id: campaignId, contribution_id: row.contribution_id },
     }),

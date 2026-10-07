@@ -126,3 +126,9 @@ verify_jwt = false   # server-to-server iz domovina-ulaznice Workera; autentikac
 
 [functions.events-stripe-confirm]
 verify_jwt = false   # server-to-server iz Workera nakon verifikacije Stripe webhook potpisa; autentikacija je HMAC (EVENTS_STRIPE_CONFIRM_SECRET), ne JWT — otvorena funkcija = besplatne ulaznice
+
+[functions.sponsor-moderate]
+verify_jwt = false   # link iz e-pošte vlasniku; autentikacija je HMAC token (SPONSOR_MODERATION_SECRET), GET ne mijenja stanje
+
+[functions.sponsor-cron]
+verify_jwt = false   # scheduler (pg_cron/pg_net ili vanjski); autentikacija je x-cron-secret (SPONSOR_CRON_SECRET)

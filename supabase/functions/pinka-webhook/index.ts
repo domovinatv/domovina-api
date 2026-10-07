@@ -1,9 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { cacheLinkPreviewImage } from "../_shared/og-image-cache.ts";
+import { alertUnderpaid, notifyOwnerOfSale, processSponsorInvoice } from "../_shared/sponsor.ts";
 
-// pinka-webhook — prima OUTBOUND "intent.paid" webhook s pay.domovina.ai rail-a
-// (src/intents/outbound.ts) i oznacava doprinos placenim. Idempotentno: trigeri
-// u bazi rade stats / funded-flip / token_position.
+// pinka-webhook — prima OUTBOUND "intent.paid" / "payment.late" webhook s
+// pay.domovina.ai rail-a (src/intents/outbound.ts) i oznacava doprinos placenim.
+// Idempotentno: trigeri u bazi rade stats / funded-flip / token_position / mjesta.
+// Sponzorski trenutak nakon uplate: račun (domovina-fiskal) + e-pošta vlasniku
+// (_shared/sponsor.ts).
 //
 // Potpis = svix / Standard Webhooks (isti scheme kao inbound Monerium):
 //   headers: webhook-id, webhook-timestamp, webhook-signature: `v1,<base64>`
@@ -19,6 +22,15 @@ const SECRET = Deno.env.get("INTENT_WEBHOOK_SECRET") ?? "";
 // Optional — if unset, the payer_iban_hash is simply skipped.
 const KYC_KEY = Deno.env.get("KYC_ENCRYPTION_KEY") ?? null;
 const TOLERANCE_SECONDS = 300; // 5 min replay window
+
+// Posao nakon uplate (fiskal, Resend) ide IZA odgovora: spori fiskal ne smije
+// produljiti webhook preko timeouta raila, inače MPT ponavlja isporuku do ~47 h.
+// Lokalni/stari runtime bez EdgeRuntime → čekamo inline.
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
+function inBackground(p: Promise<unknown>): Promise<unknown> | void {
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) return EdgeRuntime.waitUntil(p);
+  return p;
+}
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -86,7 +98,11 @@ Deno.serve(async (req) => {
     return json({ ok: true, candidates: rows.length, cached }, 200);
   }
 
-  if (event.type !== "intent.paid") {
+  // payment.late = uplata koja je sjela NAKON isteka intenta. Isti payload kao
+  // intent.paid; mark_contribution_paid je namjerno prihvaća (H2 u
+  // docs/pinka-slots.md) — odbiti novac koji je već na Safeu je najgori ishod.
+  // Prije 7.10.2026. se ignorirala pa kasna SEPA uplata nikad nije knjižena.
+  if (event.type !== "intent.paid" && event.type !== "payment.late") {
     return json({ ok: true, ignored: event.type }, 200);
   }
   if (!event.sid) return json({ error: "missing_sid" }, 400);
@@ -103,6 +119,31 @@ Deno.serve(async (req) => {
       p_key: KYC_KEY,
     });
   if (error) return json({ error: error.message }, 500);
+
+  // Sponzorski trenutak: obavijest vlasniku, račun, alarm za manjak. Sve je
+  // best-effort i nikad ne mijenja 200 — uplata je već knjižena, a retry
+  // računa radi sponsor-cron. Na retry webhooka (marked=false) račun se
+  // ponovno POKUŠA; lease + Idempotency-Key jamče jedan račun.
+  const { data: sp } = await admin
+    .schema("pinka_finance")
+    .from("contributions")
+    .select("id, is_sponsor, state, underpaid")
+    .eq("payment_intent_sid", event.sid)
+    .maybeSingle();
+  const sponsor = sp as { id: string; is_sponsor: boolean; state: string; underpaid: boolean } | null;
+  if (sponsor?.is_sponsor) {
+    const postPay = (async () => {
+      if (sponsor.state === "paid") {
+        await notifyOwnerOfSale(admin, sponsor.id);
+        const inv = await processSponsorInvoice(admin, sponsor.id);
+        console.log(`[pinka-webhook] sponsor invoice ${sponsor.id}: ${JSON.stringify(inv)}`);
+      } else if (sponsor.underpaid && marked === true) {
+        await alertUnderpaid(admin, sponsor.id);
+      }
+    })().catch((e) => console.error(`[pinka-webhook] sponsor post-pay failed: ${e}`));
+    await inBackground(postPay);
+    return json({ ok: true, marked: marked === true, paid: sponsor.state === "paid" }, 200);
+  }
 
   // Pay-to-post link preview: only AFTER a real paid flip, if the message has a
   // URL, fetch sanitized OG via the pay-worker (public-egress, SSRF-isolated)
@@ -126,11 +167,14 @@ async function enrichLinkPreview(sid: string) {
   const { data } = await admin
     .schema("pinka_finance")
     .from("contributions")
-    .select("id, message, link_preview")
+    .select("id, state, message, link_preview")
     .eq("payment_intent_sid", sid)
     .maybeSingle();
-  const row = data as { id?: string; message?: string | null; link_preview?: unknown } | null;
-  if (!row?.id || !row.message || row.link_preview) return; // no msg / already enriched
+  const row = data as { id?: string; state?: string; message?: string | null; link_preview?: unknown } | null;
+  // marked=true vrijedi i za manjak kupnje mjesta (state='failed') — neplaćena
+  // poruka ne dobiva OG preview.
+  if (!row?.id || row.state !== "paid") return;
+  if (!row.message || row.link_preview) return; // no msg / already enriched
   const url = row.message.match(/https?:\/\/[^\s]+/)?.[0];
   if (!url) return;
   const res = await fetch(OG_PREVIEW_URL, {

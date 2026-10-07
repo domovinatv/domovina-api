@@ -1,6 +1,9 @@
 # Pinka slots — rezervacija pojedinačno birljivih mjesta
 
-Status: **implementirano, nije deployano** (migracija `20260722120000_pinka_slots.sql`).
+Status: **deployano** (migracija `20260722120000_pinka_slots.sql`; provjereno u
+`supabase_migrations.schema_migrations` na produkciji 7.10.2026., 1 `slot_map`).
+Nadogradnja za sponzorske trenutke (`timeline` karta, provjera iznosa, istek
+zakupa): [`sponzorski-trenuci-ugovor.md`](sponzorski-trenuci-ugovor.md).
 
 ## Zašto generički sloj
 
