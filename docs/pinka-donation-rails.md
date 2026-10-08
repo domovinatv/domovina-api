@@ -63,6 +63,15 @@ Direct donations come from the donor's own wallet → credited.
   the Supabase edge container. Signs/verifies the `intent.paid` outbound webhook + the
   on-chain indexer ingest. (`pinka-onchain-confirm` needs no secret.)
 
+## Gostujuća donacija (od 8.10.2026.)
+
+Anonimne Supabase prijave se gase. `pinka-contribute` bez sesije (bez bearera ili
+s anon ključem) radi kao **gost**: service klijent, doprinos bez accounta,
+Turnstile kad je `TURNSTILE_SECRET_KEY` postavljen, 30 uspješnih / sat / IP.
+Gost ne smije rezervirati mjesta (`401 login_required`). Ugovor:
+[`sponzorski-trenuci-ugovor.md`](sponzorski-trenuci-ugovor.md) §9; redoslijed gašenja:
+[`sponzorski-trenuci-zakljucak.md`](sponzorski-trenuci-zakljucak.md) §7.
+
 ## Live status UX
 
 - Fiat: panel polls `contribution_status` every 3s → "Hvala 🙏" ~3s after the webhook.
