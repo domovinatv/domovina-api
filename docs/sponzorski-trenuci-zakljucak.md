@@ -269,6 +269,10 @@ ni podataka za migraciju. Prijelaz anon → stalni bio je izvor support problema
 `pinka-link-preview`). Sve ostalo već traži pravi račun ili radi bez sesije
 (ulaznice preko `events-order`, javni viewovi).
 
+> **Netočno (review 8.10.2026.):** `handoff-consume` (prijava novog uređaja
+> kodom) traži sesiju i bez nje vraća 401. Vidi
+> `docs/review-2026-10-08-sponzorski-trenuci.md` §1.
+
 **Odluka:**
 - sponzorski checkout i upload loga traže **pravi račun** (`login_required`);
 - donacija ide **kao gost**, bez lažnog korisnika (ugovor §9).
