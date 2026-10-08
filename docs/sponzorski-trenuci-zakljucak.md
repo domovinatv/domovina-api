@@ -3,8 +3,13 @@
 *7.10.2026. Ugovor prema frontendu: [`sponzorski-trenuci-ugovor.md`](sponzorski-trenuci-ugovor.md).
 Plan: `domovina.ai/docs/plans/2026-10-06-mvp-sponzorski-trenuci-domovina-tv.md`.*
 
-**Ništa od ovoga nije na produkciji.** Sve je testirano lokalno. Puštanje je
-§3 i čeka izričito „da".
+**Backend je na produkciji od 8.10.2026.** (deploy journal
+`deploys/20261008T061422Z-6d6947e.md`). Kupcima je vidljiv tek kad izađe
+frontend release (`domovina.ai`). Na produkciji još nedostaju:
+- `FISKAL_API_KEY`, `FISKAL_POSLOVNI_PROSTOR` i `FISKAL_NAPLATNI_UREDAJ` — dok ih
+  nema, račun ide u `failed` (`fiskal_not_configured`), vidi §3 „Nakon postavljanja fiskala";
+- `TURNSTILE_SECRET_KEY` (§7, korak 3);
+- odluka o cijenama (P5).
 
 ---
 
@@ -115,32 +120,44 @@ cd ~/git/domovinatv/domovina-api
 # 0. backup — db-migrate.sh backupira samo public + domovina_ai (pinka-slots.md)
 ./scripts/db-dump.sh --schemas pinka_finance --data
 
-# 1. migracije (dry-run pa stvarno). Seed kopira vlasnika i Safe s
-#    podrzi-domovina-podcast i otvara kampanju 'active' — to je trenutak uključenja.
-./scripts/db-migrate.sh --dry-run
-./scripts/db-migrate.sh
+# 1. migracije. ⚠ NE ./scripts/db-migrate.sh: povukao bi i namjerno zadržane
+#    20260903120000_events_publish_rail_gate / 20260903120100_events_rotate_ticket_tokens.
+#    Primijenjene su pojedinačno, istim koracima kao skripta (begin; <fajl>;
+#    insert u supabase_migrations.schema_migrations; commit) — 8.10.2026. ✅
+#    Seed kopira vlasnika i Safe s podrzi-domovina-podcast i otvara kampanju 'active'.
 #    provjera: 79 trenutaka, 7 epizoda
 #    select count(*), count(distinct youtube_id) from pinka_finance.public_sponsor_moments;
 
-# 2. env za edge container (svaki KEY=VALUE posebno; vrijednosti NE u repo/chat)
-./scripts/coolify-env-set.sh FISKAL_URL=https://fiskal-test.domovina.ai -y
-./scripts/coolify-env-set.sh FISKAL_API_KEY=dfk_… -y
-./scripts/coolify-env-set.sh FISKAL_POSLOVNI_PROSTOR=… -y
-./scripts/coolify-env-set.sh FISKAL_NAPLATNI_UREDAJ=… -y
-./scripts/coolify-env-set.sh SPONSOR_MODERATION_SECRET="$(openssl rand -hex 32)" -y
-./scripts/coolify-env-set.sh SPONSOR_CRON_SECRET="$(openssl rand -hex 32)" -y
-./scripts/coolify-env-set.sh SPONSOR_OWNER_EMAIL=… -y          # opcionalno
-./scripts/coolify-env-set.sh PUBLIC_FUNCTIONS_URL=https://api.domovina.ai/functions/v1 -y \
-  --recreate-service=supabase-edge-functions
+# 2. env za edge container. ⚠ SVAKI poziv treba --recreate-service: bez njega
+#    vrijednost ode samo u Coolify bazu, a host .env (koji container čita) se ne
+#    ažurira do punog deploya — tajna "postoji" u Coolifyju, a funkcija je ne vidi
+#    (dogodilo se 8.10.2026.). Coolify API vrijednosti ne vraća, pa izgubljenu
+#    tajnu treba generirati iznova.
+#    ✅ postavljeno: SPONSOR_MODERATION_SECRET, SPONSOR_CRON_SECRET, PUBLIC_FUNCTIONS_URL
+#    ⏳ postavlja vlasnik (vrijednosti ne idu kroz chat):
+R=--recreate-service=supabase-edge-functions
+./scripts/coolify-env-set.sh FISKAL_API_KEY=dfk_… -y $R
+./scripts/coolify-env-set.sh FISKAL_POSLOVNI_PROSTOR=… -y $R
+./scripts/coolify-env-set.sh FISKAL_NAPLATNI_UREDAJ=… -y $R
+./scripts/coolify-env-set.sh SPONSOR_OWNER_EMAIL=… -y $R      # opcionalno
+# FISKAL_URL se ne postavlja: zadano je https://fiskal-test.domovina.ai
 
-# 3. funkcije (_shared ide automatski uz --only)
+# Nakon postavljanja fiskala: računi koji su u međuvremenu pali na
+# fiskal_not_configured imaju potrošene pokušaje — vrati ih u red:
+#   update pinka_finance.contributions
+#      set invoice_state = 'pending', invoice_attempts = 0, invoice_next_at = null
+#    where is_sponsor and state = 'paid' and invoice_last_error = 'fiskal_not_configured';
+
+# 3. funkcije (_shared ide automatski uz --only) — 8.10.2026. ✅
 ./scripts/deploy-functions.sh --only=pinka-contribute
 ./scripts/deploy-functions.sh --only=pinka-webhook
 ./scripts/deploy-functions.sh --only=pinka-link-preview
 ./scripts/deploy-functions.sh --only=sponsor-moderate
 ./scripts/deploy-functions.sh --only=sponsor-cron --restart -y
 
-# 4. cron — pg_cron + pg_net, tajna u Vaultu (nikad u migraciji)
+# 4. cron — pg_cron + pg_net, tajna u Vaultu (nikad u migraciji) — 8.10.2026. ✅
+#    (pg_cron je bio u shared_preload_libraries, cron.database_name = postgres;
+#    pg_net → http://supabase-kong:8000 provjereno: 200 {"ok":true,…})
 #    kroz SSH psql obrazac iz project_deploy_workflow (SQL u temp file → cat | ssh)
 ```
 
