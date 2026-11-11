@@ -170,7 +170,8 @@ POOLER_TENANT_ID=domovina
 
 # --- PostgREST schema exposure — KRITIČNO za domovina.ai Flutter klijent ---
 # Bez domovina_ai u listi, PostgREST ne exposa watch_progress/favorites/itd.
-PGRST_DB_SCHEMAS=public,storage,graphql_public,domovina_ai,pinka_finance
+# vijesti = portal vijesti (domovina.ai/vijesti), dodano 2026-11-11.
+PGRST_DB_SCHEMAS=public,storage,graphql_public,domovina_ai,pinka_finance,vijesti
 
 # --- SMTP defaults (SMTP_PASS dolazi iz .local-secrets.env) ---
 SMTP_HOST=smtp.resend.com
