@@ -12,6 +12,9 @@ import { corsHeaders } from "../_shared/cors.ts";
 // Paginacija/filtriranje (E4): ?grad=<venue_city> (case-insensitive substring),
 // ?from=<ISO>/&to=<ISO> (events.starts_at prozor), ?limit=<1..100> (default 50),
 // ?offset=<n>. Bez parametara ponašanje je identično E2 (prvih 50).
+//
+// S2b (domovina-ulaznice web/): event dobiva venue_lat, venue_lon, cover_image_alt —
+// aditivno i nullable, stari klijenti ih ignoriraju.
 
 const URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -37,7 +40,8 @@ Deno.serve(async (req) => {
     .select(
       "id, slug, title, description, destination_address, state, " +
         "events!inner(event_type, venue_name, venue_address, venue_city, starts_at, ends_at, " +
-        "timezone, description_hr, description_en, cover_image_url, organizer_name, organizer_email, organizer_web), " +
+        "timezone, description_hr, description_en, cover_image_url, cover_image_alt, venue_lat, venue_lon, " +
+        "organizer_name, organizer_email, organizer_web), " +
         "campaign_tiers(id, title, description, kind, price_cents, inventory_total, inventory_claimed, " +
         "imenska, sale_start, sale_end, sort)",
     )
