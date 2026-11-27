@@ -38,6 +38,10 @@ import { corsHeaders } from "../_shared/cors.ts";
 // Odobravanje (2026-11-25): `submit` (organizator), `review_queue`, `approve`,
 // `reject` (admin platforme). Skica poslana na odobrenje ima submitted_at;
 // odobrenje je postavi u active + public.
+//
+// Arhiva (2026-11-27): `archive` i `unarchive` (admin računa ili admin
+// platforme) premještaju objavljeni događaj u kantu i natrag; `platform_events`
+// (admin platforme) daje sve objavljene i arhivirane događaje svih organizatora.
 
 const URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -216,6 +220,19 @@ Deno.serve(async (req) => {
       const note = opt(body.note);
       if (note !== null && note.length > 1000) return json({ error: "invalid_review_note" }, 400);
       const { data, error } = await rpc("reject_event", { p_campaign_id: body.campaign_id, p_note: note });
+      return respond(data, error);
+    }
+
+    case "archive":
+    case "unarchive": {
+      if (!UUID_RE.test(str(body.campaign_id))) return json({ error: "invalid_campaign_id" }, 400);
+      const fn = action === "archive" ? "archive_event" : "unarchive_event";
+      const { data, error } = await rpc(fn, { p_campaign_id: body.campaign_id });
+      return respond(data, error);
+    }
+
+    case "platform_events": {
+      const { data, error } = await rpc("platform_events", {});
       return respond(data, error);
     }
 
